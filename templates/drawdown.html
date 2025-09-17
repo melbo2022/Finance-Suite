@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}年金計算 – Finance Suite{% endblock %}
+
+{% block content %}
+<h1 class="mb-3">年金計算（取り崩し）</h1>
+<p class="text-muted small mb-3">
+  現在の貯蓄（PV）を運用しながら毎月取り崩すとき、PV / 取崩額（WD） / 残存額（B） / 年率 / 取崩年数のうち1つを解きます。年次ダウンサンプリングした残高グラフを表示します。
+</p>
+
+<form method="post" action="{{ url_for('page_drawdown') }}" class="card p-3 mb-4">
+  <div class="row g-3">
+    <div class="col-12 col-md-4">
+      <label class="form-label">解く対象</label>
+      <select name="solve" class="form-select">
+        <option value="withdrawal" {{ 'selected' if request.form.get('solve','withdrawal')=='withdrawal' }}>毎月取崩額 WD</option>
+        <option value="pv"         {{ 'selected' if request.form.get('solve')=='pv' }}>必要PV</option>
+        <option value="residual"   {{ 'selected' if request.form.get('solve')=='residual' }}>最終残存額 B</option>
+        <option value="years"      {{ 'selected' if request.form.get('solve')=='years' }}>取崩年数</option>
+        <option value="rate"       {{ 'selected' if request.form.get('solve')=='rate' }}>利回り（年率）</option>
+      </select>
+    </div>
+
+    <div class="col-12 col-md-4">
+      <label class="form-label">現在貯蓄 PV</label>
+      <input type="text" name="pv" class="form-control" value="{{ request.form.get('pv','') }}">
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label">毎月取崩額 WD</label>
+      <input type="text" name="withdrawal" class="form-control" value="{{ request.form.get('withdrawal','') }}">
+    </div>
+
+    <div class="col-12 col-md-4">
+      <label class="form-label">取崩年数（年）</label>
+      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','') }}">
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label">年率（%）</label>
+      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','') }}">
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label">最終残存額 B</label>
+      <input type="text" name="residual" class="form-control" value="{{ request.form.get('residual','') }}">
+    </div>
+
+    <div class="col-12">
+      <label class="form-label me-3">支払タイミング</label>
+      {% set due_val = request.form.get('due','end') %}
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="due" id="dueEnd" value="end" {{ 'checked' if due_val=='end' else '' }}>
+        <label class="form-check-label" for="dueEnd">期末（後払い）</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="due" id="dueBegin" value="begin" {{ 'checked' if due_val=='begin' else '' }}>
+        <label class="form-check-label" for="dueBegin">期首（先払い）</label>
+      </div>
+    </div>
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">計算</button>
+    </div>
+  </div>
+</form>
+
+{% if result %}
+  <div class="card mb-4">
+    <div class="card-body">
+      <h5 class="card-title">計算結果</h5>
+      <div class="row">
+        <div class="col-12 col-lg-6">
+          <ul class="list-group list-group-flush">
+            {% if result.solve == 'withdrawal' %}
+              <li class="list-group-item">毎月取崩額 WD: <strong>{{ "{:,.2f}".format(result.withdrawal) }}</strong></li>
+              <li class="list-group-item">期間（月）: {{ result.n }}</li>
+            {% elif result.solve == 'pv' %}
+              <li class="list-group-item">必要PV: <strong>{{ "{:,.2f}".format(result.pv) }}</strong></li>
+              <li class="list-group-item">期間（月）: {{ result.n }}</li>
+            {% elif result.solve == 'residual' %}
+              <li class="list-group-item">最終残存額 B: <strong>{{ "{:,.2f}".format(result.residual) }}</strong></li>
+              <li class="list-group-item">期間（月）: {{ result.n }}</li>
+            {% elif result.solve == 'years' %}
+              <li class="list-group-item">必要年数（年）: <strong>{{ result.years }}</strong></li>
+              <li class="list-group-item">必要期間（月）: {{ result.months }}</li>
+            {% elif result.solve == 'rate' %}
+              <li class="list-group-item">利回り（年率, %）: <strong>{{ "{:,.6f}".format(result.annual_rate_pct) }}</strong></li>
+              <li class="list-group-item">利回り（月率, %）: {{ "{:,.6f}".format(result.monthly_rate_pct) }}</li>
+              {% if result.n %}<li class="list-group-item">期間（月）: {{ result.n }}</li>{% endif %}
+            {% endif %}
+          </ul>
+        </div>
+        <div class="col-12 col-lg-6">
+          <div class="border rounded p-3">
+            <h6 class="mb-2">年次残高グラフ</h6>
+            <canvas id="drawdownChart"></canvas>
+            <p class="text-muted small mb-0 mt-2">
+              0年目は初期残高、以降は12ヶ月ごと（端数は最終月）。
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+{% endif %}
+
+{% if result and result.chart_labels and result.chart_data %}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <script>
+    (function() {
+      const el = document.getElementById('drawdownChart');
+      if (!el) return;
+      const labels = {{ result.chart_labels | tojson }};
+      const data = {{ result.chart_data | tojson }};
+      new Chart(el, {
+        type: 'line',
+        data: {
+          labels,
+          datasets: [{ label: '残高', data, tension: 0.2 }]
+        },
+        options: {
+          responsive: true,
+          scales: { y: { beginAtZero: true } },
+          plugins: { legend: { display: true } }
+        }
+      });
+    })();
+  </script>
+{% endif %}
+{% endblock %}
