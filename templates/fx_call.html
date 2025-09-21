@@ -1,6 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Protective Call Visualizer{% endblock %}
 {% block content %}
+
+  <!-- ▼ 現在のページ名を表示 -->
+  <div class="mb-3">
+    <h3 class="fw-bold text-success">Protective Call</h3>
+  </div>
+
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">Parameters</div>
+    <div class="card-body">
+      <!-- ここからフォーム -->
+
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-bold">Parameters</div>
     <div class="card-body">
@@ -11,28 +22,51 @@
         </div>
         <div class="col-6 col-md-2">
           <label class="form-label">K (Strike)</label>
-          <input type="number" step="0.01" class="form-control" name="K" value="{{ '%.2f'|format(K) if K is defined else '155.00' }}">
+          <input type="number" step="0.01" class="form-control" name="K" value="{{ '%.2f'|format(K) if K is defined else '152.00' }}">
+        </div>
+
+        <!-- Premium → Volatility & Rates -->
+        <div class="col-6 col-md-2">
+          <label class="form-label">Volatility (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="vol" value="{{ '%.2f'|format(vol) if vol is defined else '10.00' }}">
         </div>
         <div class="col-6 col-md-2">
-          <label class="form-label">Premium (JPY/USD)</label>
-          <input type="number" step="0.01" class="form-control" name="premium" value="{{ '%.2f'|format(premium) if premium is defined else '1.20' }}">
+          <label class="form-label">JPY Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="r_dom" value="{{ '%.2f'|format(r_dom) if r_dom is defined else '1.60' }}">
         </div>
-        <div class="col-6 col-md-3">
+        <div class="col-6 col-md-2">
+          <label class="form-label">USD Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="r_for" value="{{ '%.2f'|format(r_for) if r_for is defined else '4.20' }}">
+        </div>
+
+        <div class="col-6 col-md-2">
           <label class="form-label">Quantity (USD)</label>
           <input type="number" step="1" class="form-control" name="qty" value="{{ '%d'|format(qty) if qty is defined else '1000000' }}">
         </div>
+
+        <!-- 借入（比較用） -->
+        <div class="col-6 col-md-1">
+          <label class="form-label">Months</label>
+          <input type="number" step="0.1" class="form-control" name="months" value="{{ '%.1f'|format(months) if months is defined else '1.0' }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">Borrow Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="borrow_rate" value="{{ '%.2f'|format(borrow_rate) if borrow_rate is defined else '4.20' }}">
+        </div>
+
         <div class="col-6 col-md-1">
           <label class="form-label">Min</label>
-          <input type="number" step="0.1" class="form-control" name="smin" value="{{ '%.1f'|format(smin) if smin is defined else '120.0' }}">
+          <input type="number" step="0.1" class="form-control" name="smin" value="{{ '%.1f'|format(smin) if smin is defined else '130.0' }}">
         </div>
         <div class="col-6 col-md-1">
           <label class="form-label">Max</label>
-          <input type="number" step="0.1" class="form-control" name="smax" value="{{ '%.1f'|format(smax) if smax is defined else '170.0' }}">
+          <input type="number" step="0.1" class="form-control" name="smax" value="{{ '%.1f'|format(smax) if smax is defined else '160.0' }}">
         </div>
         <div class="col-6 col-md-1">
           <label class="form-label">Points</label>
           <input type="number" step="1" class="form-control" name="points" value="{{ '%d'|format(points) if points is defined else '251' }}">
         </div>
+
         <div class="col-12">
           <button class="btn btn-primary">Update Chart</button>
           <a class="btn btn-outline-primary ms-2" href="{{ url_for('fx_put') }}">← Putページへ</a>
@@ -42,6 +76,55 @@
     </div>
   </div>
 
+  <!-- ▼ コストサマリー（合計カードなし） -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">コストサマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-12 col-md-4">
+          <div class="p-3 border rounded-3 h-100">
+            <div class="text-muted small mb-1">オプション料</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(premium_cost) if premium_cost is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">
+              ( Premium {{ '%.4f'|format(premium) if premium is defined else '—' }} JPY/USD × {{ '{:,.0f}'.format(qty) }} USD )
+            </div>
+            <div class="text-muted small mt-1">
+              名目比：<b>{{ '%.2f'|format(premium_pct) if premium_pct is defined else '—' }}%</b>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <div class="p-3 border rounded-3 h-100">
+            <div class="text-muted small mb-1">借入利息</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(finance_cost) if finance_cost is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">
+              ( 年率 {{ '%.2f'|format(borrow_rate) }}% × {{ '%.1f'|format(months) }}ヶ月 / 元本：{{ '{:,.0f}'.format(qty * S0) }} JPY )
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <div class="p-3 bg-light border rounded-3 h-100">
+            <div class="text-muted small mb-1">Loss floor（最大損失）</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(floor) if floor is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">= (S0 − K − Premium/JPY) × USD数量</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ▲ サマリーここまで -->
+
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-bold">損益グラフ (Protective Call: P/L vs Terminal USD/JPY)</div>
     <div class="card-body">
@@ -50,9 +133,6 @@
       {% else %}
         <div class="text-muted">グラフを表示するにはパラメータを送信してください。</div>
       {% endif %}
-      <div class="mt-2 text-muted small">
-        フロア（理論下限・最大損の下限）：<span class="code">{{ '{:,.0f}'.format(floor) if floor is defined else '' }}</span> JPY
-      </div>
     </div>
   </div>
 
@@ -61,12 +141,9 @@
     <div class="card-body">
       <ul>
         <li><b>Short USD Spot P/L (vs today)</b> … ドル売り持ちの損益。</li>
-        <li><b>Long Call P/L (incl. premium)</b> … コール買いの損益（プレミアム込み）。</li>
+        <li><b>Long Call P/L (incl. premium)</b> … コール買いの損益（GK式プレミアム込み）。</li>
         <li><b>Protective Call Combo P/L</b> … ショートUSD＋コール買いの合成損益。</li>
-        <li><b>Breakeven</b> … 損益ゼロライン。</li>
-        <li><b>S0</b> … 現在のドル円レート。</li>
-        <li><b>K</b> … コールのストライク。</li>
-        <li><b>Loss floor</b> … 最大損失。</li>
+        <li><b>Loss floor</b> … 最大損失（合成P/Lの理論下限）。</li>
       </ul>
     </div>
   </div>
@@ -77,6 +154,7 @@
       <form method="post" action="{{ url_for('fx_download_csv_call') }}" class="m-0">
         <input type="hidden" name="S0" value="{{ S0 }}">
         <input type="hidden" name="K" value="{{ K }}">
+        <!-- CSVに算出済みの premium を渡す -->
         <input type="hidden" name="premium" value="{{ premium }}">
         <input type="hidden" name="qty" value="{{ qty }}">
         <input type="hidden" name="smin" value="{{ smin }}">

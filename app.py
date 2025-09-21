@@ -1,3 +1,6 @@
+#金融電卓(積立、ローン、年金）を表示させるか、非表示にするかを選択してください（38行目）
+#-----------------------------------------------------------------------------------------
+
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
@@ -14,70 +17,276 @@ import matplotlib.pyplot as plt
 from matplotlib import rcParams
 rcParams["font.family"] = "DejaVu Sans"
 rcParams["axes.unicode_minus"] = False
+#------------------------------------------------------
+# 追加：ポイント数のクランプ関数
+def clamp_points(points):
+    """
+    グラフの分解能（points）を安全な範囲に丸める。
+    51 ～ 2001 の範囲に収め、数値化できない場合は既定 251。
+    """
+    try:
+        p = int(float(points))
+    except Exception:
+        p = 251
+    return max(51, min(p, 2001))
 
+#-------------------------------------------------------------------------------------
 app = Flask(__name__)
 app.secret_key = "replace-this-key"
+
+#金融電卓の表示・非表示フラグ-----------------------------------------------------------
+app.config["SHOW_FIN_TOOLS"] = False   # ← 表示したいとき True / 非表示にしたいとき False
+#-----------------------------------------------------------------------------------------
 
 # =====================================================
 # ================ Option Borrow tool =================
 # =====================================================
 
+import math
+from datetime import datetime as dt, date
+# Flask の import は既存のファイル側にある想定です: from flask import request, render_template
+
 def to_float(x, default):
     try:
-        v = float(x)
-        if not isfinite(v):
+        if x is None or x == "":
             return default
-        return v
+        return float(x)
     except Exception:
         return default
 
+def norm_cdf(x: float) -> float:
+    # Φ(x) = 0.5 * (1 + erf(x/√2))
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+#----------------------------------------------------------------------------------------------------
+# app.py（ホームルート）
+@app.route("/")
+def home():
+    return render_template("home.html", show_fin_tools=app.config["SHOW_FIN_TOOLS"])
+
+
+# -----------------------------------------------------------------------------------------------
+#hedge compare
+# PUT と 借入 の比較
+# -----------------------------------------------------------------------------------------------
 @app.route("/hedge", methods=["GET", "POST"])
 def borrow_index():
-    # Default parameters (sensible starting values)
     params = {
-        "notional_usd": 2000000.0,
-        "usd_rate_annual": 4.2,     # % per year
-        "jpy_rate_annual": 1.6,     # % per year
-        "option_premium_pct_per_month": 2.0,  # % of notional per month
-        "spot_jpy_per_usd": 150.0,  # JPY per USD
-        "months": 1.0
+        "notional_usd": 1_000_000.0,
+        "usd_rate_annual": 4.2,         # r_f (%/y, USD)
+        "jpy_rate_annual": 1.6,         # r_d (%/y, JPY)
+        "spot_jpy_per_usd": 150.0,      # S
+        "strike_jpy_per_usd": 148.0,    # K
+        "vol_annual": 11.0,             # σ (%/y)
+        "months": 1.0,                  # fallback
+        "trade_date": "2025-09-19",
+        "expiry_date": "2025-11-18",
+        "use_dates": True,
     }
+
     result = None
     scenarios = []
 
     if request.method == "POST":
         for k in params.keys():
-            params[k] = to_float(request.form.get(k, params[k]), params[k])
+            v = request.form.get(k, params[k])
+            if k in ("trade_date", "expiry_date"):
+                params[k] = v or params[k]
+            elif k == "use_dates":
+                params[k] = str(v).lower() in ("1", "true", "on", "yes")
+            else:
+                params[k] = to_float(v, params[k])
 
         N = params["notional_usd"]
-        months = params["months"]
-        spot = params["spot_jpy_per_usd"]
-        usd_rate = params["usd_rate_annual"] / 100.0
-        jpy_rate = params["jpy_rate_annual"] / 100.0
-        opt_prem_m = params["option_premium_pct_per_month"] / 100.0
+        S = params["spot_jpy_per_usd"]
+        K = params["strike_jpy_per_usd"]
+        r_f = params["usd_rate_annual"] / 100.0
+        r_d = params["jpy_rate_annual"] / 100.0
+        sigma = params["vol_annual"] / 100.0
 
-        # Borrowing cost = notional * (usd_rate - jpy_rate) * (months/12)
-        borrow_cost_usd = N * max(usd_rate - jpy_rate, 0.0) * (months / 12.0)
-        borrow_cost_jpy = borrow_cost_usd * spot
+        # T
+        if params["use_dates"]:
+            try:
+                trade = dt.strptime(params["trade_date"], "%Y-%m-%d").date()
+                expiry = dt.strptime(params["expiry_date"], "%Y-%m-%d").date()
+                days = max((expiry - trade).days, 0)
+                T = days / 365.0  # Actual/365
+            except Exception:
+                T = params["months"] / 12.0
+        else:
+            T = params["months"] / 12.0
 
-        # Option cost = notional * opt_prem_m * months
-        option_cost_usd = N * opt_prem_m * months
-        option_cost_jpy = option_cost_usd * spot
+        # 借入コスト
+        borrow_cost_usd = N * r_f * T
+        borrow_cost_jpy = borrow_cost_usd * S
 
-        # Thresholds (ΔJPY required per USD)
-        delta_jpy_vs_borrow = (option_cost_jpy - borrow_cost_jpy) / N
+        # Garman–Kohlhagen (PUT)
+        if T > 0:
+            d1 = (math.log(S / K) + (r_d - r_f + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+            d2 = d1 - sigma * math.sqrt(T)
+        else:
+            d1 = d2 = float("inf") if S > K else float("-inf")
+
+        # P = K e^{-r_d T} N(-d2) - S e^{-r_f T} N(-d1)
+        put_premium_per_usd = (
+            K * math.exp(-r_d * T) * norm_cdf(-d2)
+            - S * math.exp(-r_f * T) * norm_cdf(-d1)
+        )
+
+        option_cost_jpy = N * put_premium_per_usd
+        option_cost_usd = option_cost_jpy / S
+
+        # 参考値
+        delta_opt_vs_borrow = (option_cost_jpy - borrow_cost_jpy) / N
         delta_jpy_breakeven = option_cost_jpy / N
 
-        moves = [-5,-4,-3,-2,-1,0,1,2,3,4,5]
+        # シナリオ（※PUT 側はご提示の式を踏襲）
+        moves = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
         for d in moves:
-            option_payoff_jpy = max(d, 0.0) * N
-            option_pnl_jpy = option_payoff_jpy - option_cost_jpy
+            # Spot損益（ご提示のロジック）
+            kdiff = K - S
+            if d >= 0:
+                spot_pnl_jpy = d * N
+            else:
+                spot_pnl_jpy = max(d, kdiff) * N
+
+            # オプション料は固定（実務表示）
+            option_pnl_jpy = -option_cost_jpy
+
+            # 借入の損益（固定）
             borrow_pnl_jpy = -borrow_cost_jpy
-            better = "オプション" if option_pnl_jpy > borrow_pnl_jpy else ("借入" if option_pnl_jpy < borrow_pnl_jpy else "同等")
+
+            option_plus_spot_pnl_jpy = spot_pnl_jpy + option_pnl_jpy
+            diff_vs_borrow = option_plus_spot_pnl_jpy - borrow_pnl_jpy
+            better = (
+                "オプション" if option_plus_spot_pnl_jpy > borrow_pnl_jpy
+                else ("借入" if option_plus_spot_pnl_jpy < borrow_pnl_jpy else "同等")
+            )
+
             scenarios.append({
                 "move": d,
                 "option_pnl_jpy": option_pnl_jpy,
+                "spot_pnl_jpy": spot_pnl_jpy,
                 "borrow_pnl_jpy": borrow_pnl_jpy,
+                "diff_vs_borrow": diff_vs_borrow,
+                "better": better
+            })
+
+        # 追加の境界（未表示）
+        raw_neg = (option_cost_jpy - borrow_cost_jpy) / N
+        raw_pos = (option_cost_jpy - borrow_cost_jpy) / (2.0 * N)
+        delta_plusspot_vs_borrow_neg = raw_neg if raw_neg < 0 else None
+        delta_plusspot_vs_borrow_pos = raw_pos if raw_pos >= 0 else None
+
+        result = {
+            "borrow_cost_usd": borrow_cost_usd,
+            "borrow_cost_jpy": borrow_cost_jpy,
+            "option_cost_usd": option_cost_usd,
+            "option_cost_jpy": option_cost_jpy,
+            "put_premium_per_usd": put_premium_per_usd,
+            "T": T,
+            "d1": d1,
+            "d2": d2,
+            "delta_opt_vs_borrow": delta_opt_vs_borrow,
+            "delta_plusspot_vs_borrow_neg": delta_plusspot_vs_borrow_neg,
+            "delta_plusspot_vs_borrow_pos": delta_plusspot_vs_borrow_pos,
+            "delta_jpy_breakeven": delta_jpy_breakeven,
+        }
+
+    return render_template("option_borrow_put.html", params=params, result=result, scenarios=scenarios)
+
+# -----------------------------------------------------------------------------------------------
+#hedge compare
+# CALL と 借入 の比較
+# -----------------------------------------------------------------------------------------------
+@app.route("/hedge_call", methods=["GET", "POST"])
+def hedge_call():
+    """
+    CALL（ドル買いヘッジ）
+      - プレミアム：Garman–Kohlhagen（CALL）
+      - Spot損益（ドル買い視点）：(S - min(S', K)) * N で円安側は K で頭打ち
+      - オプション損益（表示）：オプション料は固定（-option_cost_jpy）
+      - 合計：Spot + Option（固定料）
+      - 借入コスト：固定（比較用）
+    """
+    params = {
+        "notional_usd": 1_000_000.0,
+        "usd_rate_annual": 4.2,      # r_f (%/y, USD)
+        "jpy_rate_annual": 1.6,      # r_d (%/y, JPY)
+        "spot_jpy_per_usd": 150.0,   # S
+        "strike_jpy_per_usd": 152.0, # K
+        "vol_annual": 11.0,          # σ (%/y)
+        "months": 1.0,               # 満期（年）= months/12
+        "use_dates": False,
+    }
+
+    result = None
+    scenarios = []
+
+    if request.method == "POST":
+        for k in params.keys():
+            v = request.form.get(k, params[k])
+            if k == "use_dates":
+                params[k] = str(v).lower() in ("1", "true", "on", "yes")
+            else:
+                params[k] = to_float(v, params[k])
+
+        N = params["notional_usd"]
+        S = params["spot_jpy_per_usd"]
+        K = params["strike_jpy_per_usd"]
+        r_f = params["usd_rate_annual"] / 100.0
+        r_d = params["jpy_rate_annual"] / 100.0
+        sigma = params["vol_annual"] / 100.0
+        T = max(params["months"], 0.0) / 12.0
+
+        # 借入コスト
+        borrow_cost_usd = N * r_f * T
+        borrow_cost_jpy = borrow_cost_usd * S
+
+        # Garman–Kohlhagen (CALL)
+        if T > 0 and sigma > 0:
+            d1 = (math.log(S / K) + (r_d - r_f + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
+            d2 = d1 - sigma * math.sqrt(T)
+        else:
+            d1 = d2 = float("inf") if S > K else float("-inf")
+
+        # C = S e^{-r_f T} N(d1) - K e^{-r_d T} N(d2)
+        call_premium_per_usd = (
+            S * math.exp(-r_f * T) * norm_cdf(d1)
+            - K * math.exp(-r_d * T) * norm_cdf(d2)
+        )
+        option_cost_jpy = N * call_premium_per_usd
+        option_cost_usd = option_cost_jpy / S
+
+        # シナリオ（ドル買い視点・Kで頭打ち）
+        moves = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
+        for d in moves:
+            S_prime = S + d  # 想定レート（円/ドル）
+
+            # 市場での支払コスト差：S' > K なら K で買えるため円安側は K で頭打ち
+            effective_rate = min(S_prime, K)
+            spot_pnl_jpy = (S - effective_rate) * N  # 円高でプラス、円安は K で下限固定
+
+            # オプション料は固定（実務表示）
+            option_pnl_jpy = -option_cost_jpy
+
+            # 借入損益（固定）
+            borrow_pnl_jpy = -borrow_cost_jpy
+
+            total_pnl = spot_pnl_jpy + option_pnl_jpy
+            diff_vs_borrow = total_pnl - borrow_pnl_jpy
+            better = (
+                "オプション" if total_pnl > borrow_pnl_jpy
+                else ("借入" if total_pnl < borrow_pnl_jpy else "同等")
+            )
+
+            scenarios.append({
+                "move": d,
+                "spot_pnl_jpy": spot_pnl_jpy,
+                "option_pnl_jpy": option_pnl_jpy,
+                "borrow_pnl_jpy": borrow_pnl_jpy,
+                "diff_vs_borrow": diff_vs_borrow,
                 "better": better
             })
 
@@ -86,35 +295,70 @@ def borrow_index():
             "borrow_cost_jpy": borrow_cost_jpy,
             "option_cost_usd": option_cost_usd,
             "option_cost_jpy": option_cost_jpy,
-            "delta_jpy_vs_borrow": delta_jpy_vs_borrow,
-            "delta_jpy_breakeven": delta_jpy_breakeven,
+            "call_premium_per_usd": call_premium_per_usd,
+            "T": T,
+            "d1": d1,
+            "d2": d2,
         }
 
-    return render_template("option_borrow.html", params=params, result=result, scenarios=scenarios)
+    return render_template("option_borrow_call.html", params=params, result=result, scenarios=scenarios)
 
+
+
+#----------------------------------------------------------------------------------------------------------------------------
 # =====================================================
 # ============== FX Options Visualizer ================
 # =====================================================
+#oputionの買い
 
+# ---------------- ユーティリティ ----------------
+def clamp_points(points):
+    """
+    グラフ分解能pointsを安全な範囲に丸める。51～2001、数値化できないときは251。
+    """
+    try:
+        p = int(float(points))
+    except Exception:
+        p = 251
+    return max(51, min(p, 2001))
+
+# ---------------- 数式（GK/正規CDF） -------------
+def norm_cdf(x: float) -> float:
+    """標準正規の累積分布。"""
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+def garman_kohlhagen_put(S0, K, r_dom, r_for, sigma, T):
+    """
+    FXプット（Garman–Kohlhagen）。返り値は JPY/USD（1USDあたりのプレミアム）。
+    r_dom, r_for, sigma は年率（実数）、T は年（= months/12）。
+    """
+    if sigma <= 0.0 or T <= 0.0:
+        return max(K - S0, 0.0)
+    sqrtT = math.sqrt(T)
+    d1 = (math.log(S0 / K) + (r_dom - r_for + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+    from_term = K * math.exp(-r_dom * T) * norm_cdf(-d2)
+    spot_term = S0 * math.exp(-r_for * T) * norm_cdf(-d1)
+    return from_term - spot_term  # JPY per USD
+
+# ---------------- 損益ロジック ----------------
 def payoff_components_put(S_T, S0, K, premium, qty):
+    """
+    現物USD、プット買い、合成（Protective Put）の各損益を返す（JPY建て）。
+    premium は JPY/USD、qty は USD 数量。
+    """
     spot_pl = (S_T - S0) * qty
     put_pl  = (np.maximum(K - S_T, 0.0) - premium) * qty
     combo_pl = spot_pl + put_pl
     return {"spot": spot_pl, "put": put_pl, "combo": combo_pl}
 
-def payoff_components_call(S_T, S0, K, premium, qty):
-    spot_pl = (S_T - S0) * (-qty)  # short USD spot
-    call_pl = (np.maximum(S_T - K, 0.0) - premium) * qty
-    combo_pl = spot_pl + call_pl
-    return {"spot": spot_pl, "opt": call_pl, "combo": combo_pl}
-
-def clamp_points(points):
-    points = int(points)
-    return max(51, min(points, 2001))
-
 def build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points):
+    """
+    グリッド（S_T配列）とグラフ・表に使うデータを生成。
+    """
     if smin >= smax:
         smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
+    points = clamp_points(points)
     S_T = np.linspace(smin, smax, points)
     pl = payoff_components_put(S_T, S0, K, premium, qty)
     rows = [{
@@ -125,33 +369,33 @@ def build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points):
     } for i in range(points)]
     return S_T, pl, rows
 
-def build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points):
-    if smin >= smax:
-        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
-    S_T = np.linspace(smin, smax, points)
-    pl = payoff_components_call(S_T, S0, K, premium, qty)
-    rows = [{
-        "st": float(S_T[i]),
-        "spot": float(pl["spot"][i]),
-        "opt":  float(pl["opt"][i]),
-        "combo": float(pl["combo"][i]),
-    } for i in range(points)]
-    return S_T, pl, rows
-
-def draw_chart_put(S_T, pl, S0, K, floor_value):
+# ---------------- 描画 ----------------
+def draw_chart_put(S_T, pl, S0, K, floor_value, premium_jpy, finance_jpy):
+    """
+    Protective Put の損益グラフを描画。
+    ※ Premium/Financing の文字ラベルは描かない（別カードで表示）。
+    """
     fig = plt.figure(figsize=(7, 4.5), dpi=120)
     ax = fig.add_subplot(111)
+
+    # ライン
     ax.plot(S_T, pl["spot"], label="Spot USD P/L (vs today)")
     ax.plot(S_T, pl["put"],  label="Long Put P/L (incl. premium)")
     ax.plot(S_T, pl["combo"], linewidth=2, label="Protective Put Combo P/L")
+
+    # 基準線
     ax.axhline(0, linewidth=1)
+
+    # 参考線：S0 / K（ラベルも簡潔に）
     ax.axvline(S0, linestyle="--", linewidth=1)
     y_top = ax.get_ylim()[1]
     ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
     ax.axvline(K, linestyle=":", linewidth=1)
     ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
+
+    # Loss floor の水平線（線のみ。文字は描かない）
     ax.axhline(floor_value, linestyle=":", linewidth=1)
-    ax.text(S_T[-1], floor_value, f" Loss floor = {floor_value:,.0f}", va="bottom", ha="right", fontsize=9)
+
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
     ax.set_title("Protective Put: P/L vs Terminal USD/JPY")
@@ -160,31 +404,24 @@ def draw_chart_put(S_T, pl, S0, K, floor_value):
     fig.tight_layout()
     return fig
 
-def draw_chart_call(S_T, pl, S0, K, floor_value):
-    fig = plt.figure(figsize=(7, 4.5), dpi=120)
-    ax = fig.add_subplot(111)
-    ax.plot(S_T, pl["spot"], label="Short USD Spot P/L (vs today)")
-    ax.plot(S_T, pl["opt"],  label="Long Call P/L (incl. premium)")
-    ax.plot(S_T, pl["combo"], linewidth=2, label="Protective Call Combo P/L")
-    ax.axhline(0, linewidth=1)
-    ax.axvline(S0, linestyle="--", linewidth=1)
-    y_top = ax.get_ylim()[1]
-    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
-    ax.axvline(K, linestyle=":", linewidth=1)
-    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
-    ax.axhline(floor_value, linestyle=":", linewidth=1)
-    ax.text(S_T[-1], floor_value, f" Loss floor = {floor_value:,.0f}", va="bottom", ha="right", fontsize=9)
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Protective Call: P/L vs Terminal USD/JPY")
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
-    return fig
-
+# ---------------- 画面ルート ----------------
 @app.route("/fx/put", methods=["GET", "POST"])
 def fx_put():
-    defaults = dict(S0=150.0, K=145.0, premium=1.2, qty=1_000_000, smin=120.0, smax=170.0, points=251)
+    """
+    Protective Put 可視化画面。
+    Premiumはユーザ入力ではなく、Volatility/金利/満期からGK式で算出。
+    借入率（年率%）と期間（月）は表示用の利息計算に用いる。
+    """
+    defaults = dict(
+        S0=150.0, K=148.0,
+        vol=10.0,                 # 年率％
+        r_dom=1.6,                # JPY金利（年率％）
+        r_for=4.2,                # USD金利（年率％）
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,               # 満期（月）
+        borrow_rate=4.2           # 借入年率（％）…表示用
+    )
 
     if request.method == "POST":
         def fget(name, cast=float, default=None):
@@ -195,48 +432,80 @@ def fx_put():
                 return default if default is not None else defaults[name]
         S0 = fget("S0", float, defaults["S0"])
         K = fget("K", float, defaults["K"])
-        premium = fget("premium", float, defaults["premium"])
+        vol = fget("vol", float, defaults["vol"])
+        r_dom = fget("r_dom", float, defaults["r_dom"])
+        r_for = fget("r_for", float, defaults["r_for"])
         qty = fget("qty", float, defaults["qty"])
         smin = fget("smin", float, defaults["smin"])
         smax = fget("smax", float, defaults["smax"])
         points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
     else:
-        S0, K, premium, qty, smin, smax, points = defaults.values()
+        S0 = defaults["S0"]; K = defaults["K"]; vol = defaults["vol"]
+        r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
 
     points = clamp_points(points)
+
+    # --- GK式でプレミアム( JPY/USD )を算出 ---
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    premium = garman_kohlhagen_put(S0, K, r_dom/100.0, r_for/100.0, sigma, T)  # JPY/USD
+
+    # グリッドと損益（算出premiumを使用）
     S_T, pl, rows = build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points)
+
+    # Loss floor（従来通り）
     floor_value = (K - S0 - premium) * qty
 
-    fig = draw_chart_put(S_T, pl, S0, K, floor_value)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
+    # オプション料と借入利息（表示用）
+    premium_jpy = premium * qty
+    notional_jpy = S0 * qty
+    premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
+    finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
+
+    # 描画
+    fig = draw_chart_put(S_T, pl, S0, K, floor_value, premium_jpy, finance_jpy)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
     return render_template(
         "fx_put.html",
         png_b64=png_b64,
-        S0=S0, K=K, premium=premium, qty=qty,
-        smin=smin, smax=smax, points=points,
+        # 入力（Vol/金利/満期）
+        S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力（算出値）
+        premium=premium,                    # JPY/USD（CSVや表示に供給）
         floor=floor_value,
+        premium_cost=premium_jpy,
+        finance_cost=finance_jpy,
+        total_cost=premium_jpy + finance_jpy,
+        premium_pct=premium_pct_of_qty,
         rows=rows
     )
 
 @app.route("/fx/download_csv_put", methods=["POST"])
 def fx_download_csv_put():
+    """
+    Protective Put のグリッドをCSVでダウンロード。
+    ※ premium はテンプレート側から算出済みの値がPOSTされる前提。
+    """
     def fget(name, cast=float, default=None):
         val = request.form.get(name, "")
         try:
             return cast(val)
         except Exception:
             return default
+
     S0 = fget("S0", float, 150.0)
-    K = fget("K", float, 145.0)
-    premium = fget("premium", float, 1.2)
+    K = fget("K", float, 148.0)
+    premium = fget("premium", float, 0.74)  # ← 画面で算出された値が hidden で渡ってくる
     qty = fget("qty", float, 1_000_000.0)
-    smin = fget("smin", float, 120.0)
-    smax = fget("smax", float, 170.0)
+    smin = fget("smin", float, 130.0)
+    smax = fget("smax", float, 160.0)
     points = clamp_points(fget("points", float, 251))
 
     S_T, pl, _ = build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points)
@@ -252,6 +521,7 @@ def fx_download_csv_put():
             f"{pl['put'][i]:.6f}",
             f"{pl['combo'][i]:.6f}"
         ])
+
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
     data.seek(0)
     return send_file(
@@ -259,9 +529,109 @@ def fx_download_csv_put():
         as_attachment=True, download_name="protective_put_pnl.csv"
     )
 
+#---------------------------------------------------------------------------------------------------------------------------------
+#---------------------------------------------------------------------------------------------------------------------------------
+# ====== CALLの買い======
+
+def norm_cdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+def garman_kohlhagen_call(S0, K, r_dom, r_for, sigma, T):
+    """
+    FXコール（Garman–Kohlhagen）。返り値は JPY/USD（1USDあたりのプレミアム）。
+    r_dom, r_for, sigma は年率（実数）、T は年（= months/12）。
+    """
+    if sigma <= 0.0 or T <= 0.0:
+        return max(S0 - K, 0.0)
+    sqrtT = math.sqrt(T)
+    d1 = (math.log(S0 / K) + (r_dom - r_for + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+    spot_term = S0 * math.exp(-r_for * T) * norm_cdf(d1)
+    from_term = K * math.exp(-r_dom * T) * norm_cdf(d2)
+    return spot_term - from_term  # JPY per USD
+
+
+# ====== 既存: P/Lヘルパ ======
+def payoff_components_call(S_T, S0, K, premium, qty):
+    """
+    Call用の損益内訳（JPY）。
+    spot: USDショートの損益、opt: コール買い（プレミアム込み）、combo: 合成
+    """
+    spot_pl = (S_T - S0) * (-qty)                          # USDショートの損益
+    call_pl = (np.maximum(S_T - K, 0.0) - premium) * qty   # コール損益（プレミアム込み）
+    combo_pl = spot_pl + call_pl
+    return {"spot": spot_pl, "opt": call_pl, "combo": combo_pl}
+
+def build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points):
+    """
+    Call用のグリッド生成＆テーブル行作成。
+    """
+    if smin >= smax:
+        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
+    points = clamp_points(points)
+    S_T = np.linspace(smin, smax, points)
+    pl = payoff_components_call(S_T, S0, K, premium, qty)
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "opt":  float(pl["opt"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(points)]
+    return S_T, pl, rows
+
+def draw_chart_call(S_T, pl, S0, K, floor_value):
+    """
+    Protective Call の損益グラフを描画。
+    ※ Premium/Financing 等の数値ラベルは描かない（別カードで表示）。
+    """
+    fig = plt.figure(figsize=(7, 4.5), dpi=120)
+    ax = fig.add_subplot(111)
+
+    # ライン
+    ax.plot(S_T, pl["spot"], label="Short USD Spot P/L (vs today)")
+    ax.plot(S_T, pl["opt"],  label="Long Call P/L (incl. premium)")
+    ax.plot(S_T, pl["combo"], linewidth=2, label="Protective Call Combo P/L")
+
+    # 基準線
+    ax.axhline(0, linewidth=1)
+
+    # 参考線：S0 / K（簡潔なラベル）
+    ax.axvline(S0, linestyle="--", linewidth=1)
+    y_top = ax.get_ylim()[1]
+    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+
+    ax.axvline(K, linestyle=":", linewidth=1)
+    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
+
+    # Loss floor（線のみ。文字は描かない）
+    ax.axhline(floor_value, linestyle=":", linewidth=1)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Protective Call: P/L vs Terminal USD/JPY")
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+
+# ====== ルート: /fx/call  ======
 @app.route("/fx/call", methods=["GET", "POST"])
 def fx_call():
-    defaults = dict(S0=150.0, K=155.0, premium=1.2, qty=1_000_000, smin=120.0, smax=170.0, points=251)
+    """
+    Call 版：Premium はユーザ入力ではなく、Volatility/金利/満期から GK 式で算出。
+    さらにオプション料の名目比（%）も表示する。
+    """
+    defaults = dict(
+        S0=150.0, K=152.0,
+        vol=10.0,               # 年率％（ボラ）
+        r_dom=1.6,              # JPY金利（年率％）
+        r_for=4.2,              # USD金利（年率％）
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,             # 満期（月）
+        borrow_rate=4.2         # 借入年率（％）…表示用
+    )
 
     if request.method == "POST":
         def fget(name, cast=float, default=None):
@@ -272,33 +642,60 @@ def fx_call():
                 return default if default is not None else defaults[name]
         S0 = fget("S0", float, defaults["S0"])
         K = fget("K", float, defaults["K"])
-        premium = fget("premium", float, defaults["premium"])
+        vol = fget("vol", float, defaults["vol"])
+        r_dom = fget("r_dom", float, defaults["r_dom"])
+        r_for = fget("r_for", float, defaults["r_for"])
         qty = fget("qty", float, defaults["qty"])
         smin = fget("smin", float, defaults["smin"])
         smax = fget("smax", float, defaults["smax"])
         points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
     else:
-        S0, K, premium, qty, smin, smax, points = defaults.values()
+        S0 = defaults["S0"]; K = defaults["K"]; vol = defaults["vol"]
+        r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
 
     points = clamp_points(points)
+
+    # --- GK式でコール・プレミアム( JPY/USD )を算出 ---
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    premium = garman_kohlhagen_call(S0, K, r_dom/100.0, r_for/100.0, sigma, T)
+
+    # グリッドと損益（算出premiumを使用）
     S_T, pl, rows = build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points)
+
+    # Loss floor（従来式）
     floor_value = (S0 - K - premium) * qty
 
+    # 表示用：オプション料と借入利息・名目比
+    premium_jpy = premium * qty
+    notional_jpy = S0 * qty
+    premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
+    finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
+    # グラフ
     fig = draw_chart_call(S_T, pl, S0, K, floor_value)
-    buf = io.BytesIO()
-    fig.savefig(buf, format="png")
-    plt.close(fig)
-    buf.seek(0)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
     return render_template(
         "fx_call.html",
         png_b64=png_b64,
-        S0=S0, K=K, premium=premium, qty=qty,
-        smin=smin, smax=smax, points=points,
+        # 入力
+        S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力（算出値）
+        premium=premium,                 # JPY/USD（CSVや表示に供給）
         floor=floor_value,
+        premium_cost=premium_jpy,
+        finance_cost=finance_jpy,
+        total_cost=premium_jpy + finance_jpy,
+        premium_pct=premium_pct_of_qty,  # 名目比 %
         rows=rows
     )
+
 
 @app.route("/fx/download_csv_call", methods=["POST"])
 def fx_download_csv_call():
@@ -309,11 +706,11 @@ def fx_download_csv_call():
         except Exception:
             return default
     S0 = fget("S0", float, 150.0)
-    K = fget("K", float, 155.0)
-    premium = fget("premium", float, 1.2)
+    K = fget("K", float, 152.0)
+    premium = fget("premium", float, 0.62)  # ← 画面で算出された値（hidden）を受ける
     qty = fget("qty", float, 1_000_000.0)
-    smin = fget("smin", float, 120.0)
-    smax = fget("smax", float, 170.0)
+    smin = fget("smin", float, 130.0)
+    smax = fget("smax", float, 160.0)
     points = clamp_points(fget("points", float, 251))
 
     S_T, pl, _ = build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points)
@@ -416,11 +813,9 @@ def build_balance_series_loan(L0: float, PMT: float, r_m: float, n: int):
         S = S * (1.0 + r_m) - PMT
         series.append(S)
     return series
+#--------------------------------------------------------------------------------------------------------------------
 
-@app.route("/")
-def home():
-    return render_template("home.html")
-
+#---------------------------------------------------------------------------------------------------------------------
 @app.route("/savings", methods=["GET", "POST"])
 def page_savings():
     result = None
@@ -552,7 +947,7 @@ def page_savings():
                 result["chart_data"]   = []
 
     return render_template("savings.html", result=result)
-
+#-------------------------------------------------------------------------------------------------------------------------------------
 @app.route("/loan", methods=["GET", "POST"])
 def page_loan():
     result = None
@@ -730,7 +1125,7 @@ def page_loan():
                 result["chart_data"]   = []
 
     return render_template("loan.html", result=result)
-
+#-------------------------------------------------------------------------------------------------------------------------------
 @app.route("/drawdown", methods=["GET", "POST"])
 def page_drawdown():
     from math import isfinite as _isfinite, log1p as _log1p, exp as _exp, log as _log
@@ -944,6 +1339,6 @@ def page_drawdown():
 
     return render_template("drawdown.html", result=result)
 
-# -------------- Run --------------
+# -------------- Run -------------------------------------------------------------------------------------------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)

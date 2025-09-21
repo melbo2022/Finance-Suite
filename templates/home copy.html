@@ -1,14 +1,11 @@
 {% extends "base.html" %}
 {% block title %}ホーム | Finance Suite{% endblock %}
-
 {% block content %}
-  <h3 class="mb-3"> FXオプション</h3>
+  <h1 class="mb-3">統合アプリ（ヘッジ比較 + FXオプション + 金融電卓）</h1>
 
-  <!-- 金融電卓を表示しない場合は中央寄せ -->
-  <div class="row {% if not show_fin_tools %}justify-content-center{% endif %}">
 
-    <!-- FX Options Visualizer -->
-    <div class="col-md-6 {% if not show_fin_tools %}offset-md-0{% endif %}">
+  <div class="row">
+    <div class="col-md-6">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">FX Options Visualizer</h5>
@@ -19,9 +16,7 @@
       </div>
     </div>
 
-    {% if show_fin_tools %}
-    <!-- 金融電卓（表示フラグが True のときだけ出す） -->
-    <div class="col-md-6 mt-3 mt-md-0">
+    <div class="col-md-6">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">金融電卓</h5>
@@ -32,7 +27,5 @@
         </div>
       </div>
     </div>
-    {% endif %}
-
   </div>
 {% endblock %}
