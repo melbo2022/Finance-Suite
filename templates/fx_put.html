@@ -7,11 +7,7 @@
     <h3 class="fw-bold text-primary">Protective Put</h3>
   </div>
 
-  <div class="card shadow-sm mb-4">
-    <div class="card-header fw-bold">Parameters</div>
-    <div class="card-body">
-      
-  <!-- ここからフォーム -->
+  <!-- ▼ Parameters -->
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-bold">Parameters</div>
     <div class="card-body">
@@ -125,8 +121,8 @@
       </div>
     </div>
   </div>
-  <!-- ▲ サマリーここまで -->
 
+  <!-- ▼ メイン損益グラフ（Y軸はM表記：画像はサーバ側で変換済み） -->
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-bold">損益グラフ (Protective Put: P/L vs Terminal USD/JPY)</div>
     <div class="card-body">
@@ -138,6 +134,26 @@
     </div>
   </div>
 
+  <!-- ▼ 比較グラフ（2本：Protective Put Combo と Borrow利息ライン） -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold d-flex align-items-center justify-content-between">
+      <span>ヘッジ比較（Put）: Option Combo vs 借入利息</span>
+      <span class="badge text-bg-secondary">Y-axis: M (百万円)</span>
+    </div>
+    <div class="card-body">
+      {% if png_b64_put_compare %}
+        <img class="img-fluid border" alt="Compare Put" src="data:image/png;base64,{{ png_b64_put_compare }}">
+      {% else %}
+        <div class="text-muted">パラメータを送信すると比較グラフが表示されます。</div>
+      {% endif %}
+      <div class="small text-muted mt-2">
+        借入利息ラインは「元本＝S0×Quantity、年率＝{{ '%.2f'|format(borrow_rate) }}%、期間＝{{ '%.1f'|format(months) }}ヶ月」を仮定しています。<br>
+        表示単位：<b>M = 百万円</b>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▼ 英語ラベルの日本語解説 -->
   <div class="card shadow-sm mb-4">
     <div class="card-header fw-bold">英語ラベルの日本語解説</div>
     <div class="card-body">
@@ -150,13 +166,13 @@
     </div>
   </div>
 
+  <!-- ▼ 計算データ一覧 -->
   <div class="card shadow-sm">
     <div class="card-header d-flex justify-content-between align-items-center">
       <span class="fw-bold">計算データ一覧</span>
       <form method="post" action="{{ url_for('fx_download_csv_put') }}" class="m-0">
         <input type="hidden" name="S0" value="{{ S0 }}">
         <input type="hidden" name="K" value="{{ K }}">
-        <!-- CSVに算出済みの premium を渡す -->
         <input type="hidden" name="premium" value="{{ premium }}">
         <input type="hidden" name="qty" value="{{ qty }}">
         <input type="hidden" name="smin" value="{{ smin }}">

@@ -48,12 +48,12 @@
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fx_put') }}">FX Put</a>
       <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fx_call') }}">FX Call</a>
 
-      <!--非表示にするときは　{# ... #}　で囲う-->
-      {#
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_savings') }}">貯蓄</a>
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_loan') }}">ローン</a>
-      <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_drawdown') }}">年金</a>
-        #}
+{% if show_fin_tools %}
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_savings') }}">貯蓄</a>
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_loan') }}">ローン</a>
+  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_drawdown') }}">年金</a>
+{% endif %}
+
     </div>
 
     <!-- 右端テキスト -->

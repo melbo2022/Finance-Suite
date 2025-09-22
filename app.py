@@ -14,6 +14,8 @@ from math import isfinite, log, log1p, exp
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.ticker as mtick
+
 from matplotlib import rcParams
 rcParams["font.family"] = "DejaVu Sans"
 rcParams["axes.unicode_minus"] = False
@@ -36,6 +38,10 @@ app.secret_key = "replace-this-key"
 
 #金融電卓の表示・非表示フラグ-----------------------------------------------------------
 app.config["SHOW_FIN_TOOLS"] = False   # ← 表示したいとき True / 非表示にしたいとき False
+@app.context_processor
+def inject_flags():
+    """全テンプレートで使えるフラグを渡す"""
+    return dict(show_fin_tools=app.config["SHOW_FIN_TOOLS"])
 #-----------------------------------------------------------------------------------------
 
 # =====================================================
@@ -309,7 +315,7 @@ def hedge_call():
 # =====================================================
 # ============== FX Options Visualizer ================
 # =====================================================
-#oputionの買い
+
 
 # ---------------- ユーティリティ ----------------
 def clamp_points(points):
@@ -341,6 +347,20 @@ def garman_kohlhagen_put(S0, K, r_dom, r_for, sigma, T):
     spot_term = S0 * math.exp(-r_for * T) * norm_cdf(-d1)
     return from_term - spot_term  # JPY per USD
 
+def garman_kohlhagen_call(S0, K, r_dom, r_for, sigma, T):
+    """
+    FXコール（Garman–Kohlhagen）。返り値は JPY/USD（1USDあたりのプレミアム）。
+    r_dom, r_for, sigma は年率（実数）、T は年（= months/12）。
+    """
+    if sigma <= 0.0 or T <= 0.0:
+        return max(S0 - K, 0.0)
+    sqrtT = math.sqrt(T)
+    d1 = (math.log(S0 / K) + (r_dom - r_for + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
+    d2 = d1 - sigma * sqrtT
+    spot_term = S0 * math.exp(-r_for * T) * norm_cdf(d1)
+    from_term = K * math.exp(-r_dom * T) * norm_cdf(d2)
+    return spot_term - from_term  # JPY per USD
+
 # ---------------- 損益ロジック ----------------
 def payoff_components_put(S_T, S0, K, premium, qty):
     """
@@ -351,6 +371,16 @@ def payoff_components_put(S_T, S0, K, premium, qty):
     put_pl  = (np.maximum(K - S_T, 0.0) - premium) * qty
     combo_pl = spot_pl + put_pl
     return {"spot": spot_pl, "put": put_pl, "combo": combo_pl}
+
+def payoff_components_call(S_T, S0, K, premium, qty):
+    """
+    Call用の損益内訳（JPY）。
+    spot: USDショートの損益、opt: コール買い（プレミアム込み）、combo: 合成
+    """
+    spot_pl = (S_T - S0) * (-qty)                          # USDショートの損益
+    call_pl = (np.maximum(S_T - K, 0.0) - premium) * qty   # コール損益（プレミアム込み）
+    combo_pl = spot_pl + call_pl
+    return {"spot": spot_pl, "opt": call_pl, "combo": combo_pl}
 
 def build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points):
     """
@@ -369,11 +399,31 @@ def build_grid_and_rows_put(S0, K, premium, qty, smin, smax, points):
     } for i in range(points)]
     return S_T, pl, rows
 
-# ---------------- 描画 ----------------
-def draw_chart_put(S_T, pl, S0, K, floor_value, premium_jpy, finance_jpy):
+def build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points):
     """
-    Protective Put の損益グラフを描画。
-    ※ Premium/Financing の文字ラベルは描かない（別カードで表示）。
+    Call用のグリッド生成＆テーブル行作成。
+    """
+    if smin >= smax:
+        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
+    points = clamp_points(points)
+    S_T = np.linspace(smin, smax, points)
+    pl = payoff_components_call(S_T, S0, K, premium, qty)
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "opt":  float(pl["opt"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(points)]
+    return S_T, pl, rows
+
+# ---------------- 描画（メイン：M表記へ） ----------------
+def _format_y_as_m(ax):
+    """Y軸を百万円（M）表記にする。"""
+    ax.yaxis.set_major_formatter(mtick.FuncFormatter(lambda x, _: f"{x/1e6:.1f}M"))
+
+def draw_chart_put(S_T, pl, S0, K, floor_value):
+    """
+    Protective Put の損益グラフを描画。Y軸はM（百万円）表記。
     """
     fig = plt.figure(figsize=(7, 4.5), dpi=120)
     ax = fig.add_subplot(111)
@@ -393,18 +443,94 @@ def draw_chart_put(S_T, pl, S0, K, floor_value, premium_jpy, finance_jpy):
     ax.axvline(K, linestyle=":", linewidth=1)
     ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
 
-    # Loss floor の水平線（線のみ。文字は描かない）
+    # Loss floor の水平線（線のみ）
     ax.axhline(floor_value, linestyle=":", linewidth=1)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
     ax.set_title("Protective Put: P/L vs Terminal USD/JPY")
+    _format_y_as_m(ax)  # ★ M表記
     ax.legend(loc="best")
     ax.grid(True, linewidth=0.3)
     fig.tight_layout()
     return fig
 
-# ---------------- 画面ルート ----------------
+def draw_chart_call(S_T, pl, S0, K, floor_value):
+    """
+    Protective Call の損益グラフを描画。Y軸はM（百万円）表記。
+    """
+    fig = plt.figure(figsize=(7, 4.5), dpi=120)
+    ax = fig.add_subplot(111)
+
+    # ライン
+    ax.plot(S_T, pl["spot"], label="Short USD Spot P/L (vs today)")
+    ax.plot(S_T, pl["opt"],  label="Long Call P/L (incl. premium)")
+    ax.plot(S_T, pl["combo"], linewidth=2, label="Protective Call Combo P/L")
+
+    # 基準線
+    ax.axhline(0, linewidth=1)
+
+    # 参考線：S0 / K（簡潔なラベル）
+    ax.axvline(S0, linestyle="--", linewidth=1)
+    y_top = ax.get_ylim()[1]
+    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(K, linestyle=":", linewidth=1)
+    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
+
+    # Loss floor（線のみ）
+    ax.axhline(floor_value, linestyle=":", linewidth=1)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Protective Call: P/L vs Terminal USD/JPY")
+    _format_y_as_m(ax)  # ★ M表記
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+# ---------------- 比較グラフ（2本：Combo vs 借入利息、Y軸M表記） ----------------
+def draw_compare_put(S_T, combo_pl, finance_cost):
+    """
+    Protective Put Combo と 借入利息(一定額) の比較グラフ。
+    借入利息ラインはコストとして見やすいよう -finance_cost で水平線にする。
+    """
+    fig = plt.figure(figsize=(7, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Protective Put Combo P/L")
+    ax.axhline(-finance_cost, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    ax.axhline(0, linewidth=1)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Put Combo vs Borrow")
+    _format_y_as_m(ax)  # ★ M表記
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+def draw_compare_call(S_T, combo_pl, finance_cost):
+    """
+    Protective Call Combo と 借入利息(一定額) の比較グラフ。
+    借入利息ラインは -finance_cost の水平線。
+    """
+    fig = plt.figure(figsize=(7, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+    ax.plot(S_T, combo_pl, linewidth=2,color="green",label="Protective Call Combo P/L")
+    ax.axhline(-finance_cost, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    ax.axhline(0, linewidth=1)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Call Combo vs Borrow")
+    _format_y_as_m(ax)  # ★ M表記
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+# ---------------- 画面ルート（PUT） ----------------
 @app.route("/fx/put", methods=["GET", "POST"])
 def fx_put():
     """
@@ -464,16 +590,24 @@ def fx_put():
     premium_jpy = premium * qty
     notional_jpy = S0 * qty
     premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
+
+    # 借入利息は「Quantityに対する利息（元本= S0×Quantity）」で算出
     finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
 
-    # 描画
-    fig = draw_chart_put(S_T, pl, S0, K, floor_value, premium_jpy, finance_jpy)
+    # メイングラフ（M表記）
+    fig = draw_chart_put(S_T, pl, S0, K, floor_value)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    # 比較グラフ（Combo vs Borrow、M表記）
+    fig_cmp = draw_compare_put(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_put_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
 
     return render_template(
         "fx_put.html",
         png_b64=png_b64,
+        png_b64_put_compare=png_b64_put_compare,
         # 入力（Vol/金利/満期）
         S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
         smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
@@ -482,7 +616,6 @@ def fx_put():
         floor=floor_value,
         premium_cost=premium_jpy,
         finance_cost=finance_jpy,
-        total_cost=premium_jpy + finance_jpy,
         premium_pct=premium_pct_of_qty,
         rows=rows
     )
@@ -502,7 +635,7 @@ def fx_download_csv_put():
 
     S0 = fget("S0", float, 150.0)
     K = fget("K", float, 148.0)
-    premium = fget("premium", float, 0.74)  # ← 画面で算出された値が hidden で渡ってくる
+    premium = fget("premium", float, 0.74)  # 画面で算出された値が hidden で渡ってくる
     qty = fget("qty", float, 1_000_000.0)
     smin = fget("smin", float, 130.0)
     smax = fget("smax", float, 160.0)
@@ -529,98 +662,12 @@ def fx_download_csv_put():
         as_attachment=True, download_name="protective_put_pnl.csv"
     )
 
-#---------------------------------------------------------------------------------------------------------------------------------
-#---------------------------------------------------------------------------------------------------------------------------------
-# ====== CALLの買い======
-
-def norm_cdf(x: float) -> float:
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-def garman_kohlhagen_call(S0, K, r_dom, r_for, sigma, T):
-    """
-    FXコール（Garman–Kohlhagen）。返り値は JPY/USD（1USDあたりのプレミアム）。
-    r_dom, r_for, sigma は年率（実数）、T は年（= months/12）。
-    """
-    if sigma <= 0.0 or T <= 0.0:
-        return max(S0 - K, 0.0)
-    sqrtT = math.sqrt(T)
-    d1 = (math.log(S0 / K) + (r_dom - r_for + 0.5 * sigma * sigma) * T) / (sigma * sqrtT)
-    d2 = d1 - sigma * sqrtT
-    spot_term = S0 * math.exp(-r_for * T) * norm_cdf(d1)
-    from_term = K * math.exp(-r_dom * T) * norm_cdf(d2)
-    return spot_term - from_term  # JPY per USD
-
-
-# ====== 既存: P/Lヘルパ ======
-def payoff_components_call(S_T, S0, K, premium, qty):
-    """
-    Call用の損益内訳（JPY）。
-    spot: USDショートの損益、opt: コール買い（プレミアム込み）、combo: 合成
-    """
-    spot_pl = (S_T - S0) * (-qty)                          # USDショートの損益
-    call_pl = (np.maximum(S_T - K, 0.0) - premium) * qty   # コール損益（プレミアム込み）
-    combo_pl = spot_pl + call_pl
-    return {"spot": spot_pl, "opt": call_pl, "combo": combo_pl}
-
-def build_grid_and_rows_call(S0, K, premium, qty, smin, smax, points):
-    """
-    Call用のグリッド生成＆テーブル行作成。
-    """
-    if smin >= smax:
-        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
-    points = clamp_points(points)
-    S_T = np.linspace(smin, smax, points)
-    pl = payoff_components_call(S_T, S0, K, premium, qty)
-    rows = [{
-        "st": float(S_T[i]),
-        "spot": float(pl["spot"][i]),
-        "opt":  float(pl["opt"][i]),
-        "combo": float(pl["combo"][i]),
-    } for i in range(points)]
-    return S_T, pl, rows
-
-def draw_chart_call(S_T, pl, S0, K, floor_value):
-    """
-    Protective Call の損益グラフを描画。
-    ※ Premium/Financing 等の数値ラベルは描かない（別カードで表示）。
-    """
-    fig = plt.figure(figsize=(7, 4.5), dpi=120)
-    ax = fig.add_subplot(111)
-
-    # ライン
-    ax.plot(S_T, pl["spot"], label="Short USD Spot P/L (vs today)")
-    ax.plot(S_T, pl["opt"],  label="Long Call P/L (incl. premium)")
-    ax.plot(S_T, pl["combo"], linewidth=2, label="Protective Call Combo P/L")
-
-    # 基準線
-    ax.axhline(0, linewidth=1)
-
-    # 参考線：S0 / K（簡潔なラベル）
-    ax.axvline(S0, linestyle="--", linewidth=1)
-    y_top = ax.get_ylim()[1]
-    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
-
-    ax.axvline(K, linestyle=":", linewidth=1)
-    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
-
-    # Loss floor（線のみ。文字は描かない）
-    ax.axhline(floor_value, linestyle=":", linewidth=1)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Protective Call: P/L vs Terminal USD/JPY")
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
-    return fig
-
-
-# ====== ルート: /fx/call  ======
+# ---------------- 画面ルート（CALL） ----------------
 @app.route("/fx/call", methods=["GET", "POST"])
 def fx_call():
     """
-    Call 版：Premium はユーザ入力ではなく、Volatility/金利/満期から GK 式で算出。
-    さらにオプション料の名目比（%）も表示する。
+    Call 版：Premium は Volatility/金利/満期から GK 式で算出。
+    オプション料の名目比（%）と、借入利息（元本= S0×Quantity）も表示。
     """
     defaults = dict(
         S0=150.0, K=152.0,
@@ -675,27 +722,32 @@ def fx_call():
     notional_jpy = S0 * qty
     premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
     finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
-    # グラフ
+
+    # メイングラフ（M表記）
     fig = draw_chart_call(S_T, pl, S0, K, floor_value)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
+    # 比較グラフ（Combo vs Borrow、M表記）
+    fig_cmp = draw_compare_call(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_call_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+
     return render_template(
         "fx_call.html",
         png_b64=png_b64,
+        png_b64_call_compare=png_b64_call_compare,
         # 入力
         S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
         smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
         # 出力（算出値）
-        premium=premium,                 # JPY/USD（CSVや表示に供給）
+        premium=premium,                 # JPY/USD
         floor=floor_value,
         premium_cost=premium_jpy,
         finance_cost=finance_jpy,
-        total_cost=premium_jpy + finance_jpy,
-        premium_pct=premium_pct_of_qty,  # 名目比 %
+        premium_pct=premium_pct_of_qty,
         rows=rows
     )
-
 
 @app.route("/fx/download_csv_call", methods=["POST"])
 def fx_download_csv_call():
@@ -707,7 +759,7 @@ def fx_download_csv_call():
             return default
     S0 = fget("S0", float, 150.0)
     K = fget("K", float, 152.0)
-    premium = fget("premium", float, 0.62)  # ← 画面で算出された値（hidden）を受ける
+    premium = fget("premium", float, 0.62)  # 画面で算出された値（hidden）を受ける
     qty = fget("qty", float, 1_000_000.0)
     smin = fget("smin", float, 130.0)
     smax = fget("smax", float, 160.0)
@@ -732,6 +784,7 @@ def fx_download_csv_call():
         data, mimetype="text/csv",
         as_attachment=True, download_name="protective_call_pnl.csv"
     )
+
 
 # =====================================================
 # ============== Investment calculators ===============
