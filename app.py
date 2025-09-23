@@ -1,4 +1,4 @@
-#金融電卓(積立、ローン、年金）を表示させるか、非表示にするかを選択してください（38行目）
+#金融電卓(積立、ローン、年金）を表示させるか、非表示にするかを選択してください（40行目）
 #-----------------------------------------------------------------------------------------
 
 # -*- coding: utf-8 -*-
@@ -37,7 +37,7 @@ app = Flask(__name__)
 app.secret_key = "replace-this-key"
 
 #金融電卓の表示・非表示フラグ-----------------------------------------------------------
-app.config["SHOW_FIN_TOOLS"] = False   # ← 表示したいとき True / 非表示にしたいとき False
+app.config["SHOW_FIN_TOOLS"] = True   # ← 表示したいとき True / 非表示にしたいとき False
 @app.context_processor
 def inject_flags():
     """全テンプレートで使えるフラグを渡す"""
@@ -50,7 +50,6 @@ def inject_flags():
 
 import math
 from datetime import datetime as dt, date
-# Flask の import は既存のファイル側にある想定です: from flask import request, render_template
 
 def to_float(x, default):
     try:
@@ -64,6 +63,18 @@ def norm_cdf(x: float) -> float:
     # Φ(x) = 0.5 * (1 + erf(x/√2))
     return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
 
+#-------------------------------------------------------------------------------------------------
+def _set_ylim_tight(ax, arrays, pad=0.08):
+    """
+    Y軸レンジを、与えた配列群（損益カーブ）だけで決める。pad は上下の余白率。
+    """
+    y_min = min(np.min(a) for a in arrays)
+    y_max = max(np.max(a) for a in arrays)
+    if y_max <= y_min:
+        y_max = y_min + 1.0  # 退避
+    span = y_max - y_min
+    ax.set_ylim(y_min - pad * span, y_max + pad * span)
+
 
 #----------------------------------------------------------------------------------------------------
 # app.py（ホームルート）
@@ -73,245 +84,7 @@ def home():
 
 
 # -----------------------------------------------------------------------------------------------
-#hedge compare
-# PUT と 借入 の比較
-# -----------------------------------------------------------------------------------------------
-@app.route("/hedge", methods=["GET", "POST"])
-def borrow_index():
-    params = {
-        "notional_usd": 1_000_000.0,
-        "usd_rate_annual": 4.2,         # r_f (%/y, USD)
-        "jpy_rate_annual": 1.6,         # r_d (%/y, JPY)
-        "spot_jpy_per_usd": 150.0,      # S
-        "strike_jpy_per_usd": 148.0,    # K
-        "vol_annual": 11.0,             # σ (%/y)
-        "months": 1.0,                  # fallback
-        "trade_date": "2025-09-19",
-        "expiry_date": "2025-11-18",
-        "use_dates": True,
-    }
 
-    result = None
-    scenarios = []
-
-    if request.method == "POST":
-        for k in params.keys():
-            v = request.form.get(k, params[k])
-            if k in ("trade_date", "expiry_date"):
-                params[k] = v or params[k]
-            elif k == "use_dates":
-                params[k] = str(v).lower() in ("1", "true", "on", "yes")
-            else:
-                params[k] = to_float(v, params[k])
-
-        N = params["notional_usd"]
-        S = params["spot_jpy_per_usd"]
-        K = params["strike_jpy_per_usd"]
-        r_f = params["usd_rate_annual"] / 100.0
-        r_d = params["jpy_rate_annual"] / 100.0
-        sigma = params["vol_annual"] / 100.0
-
-        # T
-        if params["use_dates"]:
-            try:
-                trade = dt.strptime(params["trade_date"], "%Y-%m-%d").date()
-                expiry = dt.strptime(params["expiry_date"], "%Y-%m-%d").date()
-                days = max((expiry - trade).days, 0)
-                T = days / 365.0  # Actual/365
-            except Exception:
-                T = params["months"] / 12.0
-        else:
-            T = params["months"] / 12.0
-
-        # 借入コスト
-        borrow_cost_usd = N * r_f * T
-        borrow_cost_jpy = borrow_cost_usd * S
-
-        # Garman–Kohlhagen (PUT)
-        if T > 0:
-            d1 = (math.log(S / K) + (r_d - r_f + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
-            d2 = d1 - sigma * math.sqrt(T)
-        else:
-            d1 = d2 = float("inf") if S > K else float("-inf")
-
-        # P = K e^{-r_d T} N(-d2) - S e^{-r_f T} N(-d1)
-        put_premium_per_usd = (
-            K * math.exp(-r_d * T) * norm_cdf(-d2)
-            - S * math.exp(-r_f * T) * norm_cdf(-d1)
-        )
-
-        option_cost_jpy = N * put_premium_per_usd
-        option_cost_usd = option_cost_jpy / S
-
-        # 参考値
-        delta_opt_vs_borrow = (option_cost_jpy - borrow_cost_jpy) / N
-        delta_jpy_breakeven = option_cost_jpy / N
-
-        # シナリオ（※PUT 側はご提示の式を踏襲）
-        moves = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
-        for d in moves:
-            # Spot損益（ご提示のロジック）
-            kdiff = K - S
-            if d >= 0:
-                spot_pnl_jpy = d * N
-            else:
-                spot_pnl_jpy = max(d, kdiff) * N
-
-            # オプション料は固定（実務表示）
-            option_pnl_jpy = -option_cost_jpy
-
-            # 借入の損益（固定）
-            borrow_pnl_jpy = -borrow_cost_jpy
-
-            option_plus_spot_pnl_jpy = spot_pnl_jpy + option_pnl_jpy
-            diff_vs_borrow = option_plus_spot_pnl_jpy - borrow_pnl_jpy
-            better = (
-                "オプション" if option_plus_spot_pnl_jpy > borrow_pnl_jpy
-                else ("借入" if option_plus_spot_pnl_jpy < borrow_pnl_jpy else "同等")
-            )
-
-            scenarios.append({
-                "move": d,
-                "option_pnl_jpy": option_pnl_jpy,
-                "spot_pnl_jpy": spot_pnl_jpy,
-                "borrow_pnl_jpy": borrow_pnl_jpy,
-                "diff_vs_borrow": diff_vs_borrow,
-                "better": better
-            })
-
-        # 追加の境界（未表示）
-        raw_neg = (option_cost_jpy - borrow_cost_jpy) / N
-        raw_pos = (option_cost_jpy - borrow_cost_jpy) / (2.0 * N)
-        delta_plusspot_vs_borrow_neg = raw_neg if raw_neg < 0 else None
-        delta_plusspot_vs_borrow_pos = raw_pos if raw_pos >= 0 else None
-
-        result = {
-            "borrow_cost_usd": borrow_cost_usd,
-            "borrow_cost_jpy": borrow_cost_jpy,
-            "option_cost_usd": option_cost_usd,
-            "option_cost_jpy": option_cost_jpy,
-            "put_premium_per_usd": put_premium_per_usd,
-            "T": T,
-            "d1": d1,
-            "d2": d2,
-            "delta_opt_vs_borrow": delta_opt_vs_borrow,
-            "delta_plusspot_vs_borrow_neg": delta_plusspot_vs_borrow_neg,
-            "delta_plusspot_vs_borrow_pos": delta_plusspot_vs_borrow_pos,
-            "delta_jpy_breakeven": delta_jpy_breakeven,
-        }
-
-    return render_template("option_borrow_put.html", params=params, result=result, scenarios=scenarios)
-
-# -----------------------------------------------------------------------------------------------
-#hedge compare
-# CALL と 借入 の比較
-# -----------------------------------------------------------------------------------------------
-@app.route("/hedge_call", methods=["GET", "POST"])
-def hedge_call():
-    """
-    CALL（ドル買いヘッジ）
-      - プレミアム：Garman–Kohlhagen（CALL）
-      - Spot損益（ドル買い視点）：(S - min(S', K)) * N で円安側は K で頭打ち
-      - オプション損益（表示）：オプション料は固定（-option_cost_jpy）
-      - 合計：Spot + Option（固定料）
-      - 借入コスト：固定（比較用）
-    """
-    params = {
-        "notional_usd": 1_000_000.0,
-        "usd_rate_annual": 4.2,      # r_f (%/y, USD)
-        "jpy_rate_annual": 1.6,      # r_d (%/y, JPY)
-        "spot_jpy_per_usd": 150.0,   # S
-        "strike_jpy_per_usd": 152.0, # K
-        "vol_annual": 11.0,          # σ (%/y)
-        "months": 1.0,               # 満期（年）= months/12
-        "use_dates": False,
-    }
-
-    result = None
-    scenarios = []
-
-    if request.method == "POST":
-        for k in params.keys():
-            v = request.form.get(k, params[k])
-            if k == "use_dates":
-                params[k] = str(v).lower() in ("1", "true", "on", "yes")
-            else:
-                params[k] = to_float(v, params[k])
-
-        N = params["notional_usd"]
-        S = params["spot_jpy_per_usd"]
-        K = params["strike_jpy_per_usd"]
-        r_f = params["usd_rate_annual"] / 100.0
-        r_d = params["jpy_rate_annual"] / 100.0
-        sigma = params["vol_annual"] / 100.0
-        T = max(params["months"], 0.0) / 12.0
-
-        # 借入コスト
-        borrow_cost_usd = N * r_f * T
-        borrow_cost_jpy = borrow_cost_usd * S
-
-        # Garman–Kohlhagen (CALL)
-        if T > 0 and sigma > 0:
-            d1 = (math.log(S / K) + (r_d - r_f + 0.5 * sigma * sigma) * T) / (sigma * math.sqrt(T))
-            d2 = d1 - sigma * math.sqrt(T)
-        else:
-            d1 = d2 = float("inf") if S > K else float("-inf")
-
-        # C = S e^{-r_f T} N(d1) - K e^{-r_d T} N(d2)
-        call_premium_per_usd = (
-            S * math.exp(-r_f * T) * norm_cdf(d1)
-            - K * math.exp(-r_d * T) * norm_cdf(d2)
-        )
-        option_cost_jpy = N * call_premium_per_usd
-        option_cost_usd = option_cost_jpy / S
-
-        # シナリオ（ドル買い視点・Kで頭打ち）
-        moves = [-5, -4, -3, -2, -1, 0, 1, 2, 3, 4, 5]
-        for d in moves:
-            S_prime = S + d  # 想定レート（円/ドル）
-
-            # 市場での支払コスト差：S' > K なら K で買えるため円安側は K で頭打ち
-            effective_rate = min(S_prime, K)
-            spot_pnl_jpy = (S - effective_rate) * N  # 円高でプラス、円安は K で下限固定
-
-            # オプション料は固定（実務表示）
-            option_pnl_jpy = -option_cost_jpy
-
-            # 借入損益（固定）
-            borrow_pnl_jpy = -borrow_cost_jpy
-
-            total_pnl = spot_pnl_jpy + option_pnl_jpy
-            diff_vs_borrow = total_pnl - borrow_pnl_jpy
-            better = (
-                "オプション" if total_pnl > borrow_pnl_jpy
-                else ("借入" if total_pnl < borrow_pnl_jpy else "同等")
-            )
-
-            scenarios.append({
-                "move": d,
-                "spot_pnl_jpy": spot_pnl_jpy,
-                "option_pnl_jpy": option_pnl_jpy,
-                "borrow_pnl_jpy": borrow_pnl_jpy,
-                "diff_vs_borrow": diff_vs_borrow,
-                "better": better
-            })
-
-        result = {
-            "borrow_cost_usd": borrow_cost_usd,
-            "borrow_cost_jpy": borrow_cost_jpy,
-            "option_cost_usd": option_cost_usd,
-            "option_cost_jpy": option_cost_jpy,
-            "call_premium_per_usd": call_premium_per_usd,
-            "T": T,
-            "d1": d1,
-            "d2": d2,
-        }
-
-    return render_template("option_borrow_call.html", params=params, result=result, scenarios=scenarios)
-
-
-
-#----------------------------------------------------------------------------------------------------------------------------
 # =====================================================
 # ============== FX Options Visualizer ================
 # =====================================================
@@ -784,6 +557,487 @@ def fx_download_csv_call():
         data, mimetype="text/csv",
         as_attachment=True, download_name="protective_call_pnl.csv"
     )
+
+#---------------------------------------------------------------------------------------------------------------------------------------
+#PUTの売り
+# =====================================================
+# ==================== Put 売り版 =====================
+# =====================================================
+
+# 損益ロジック（Put 売り）
+def payoff_components_put_short(S_T, S0, K, premium, qty):
+    """
+    現物USD（ロング）、プット売り、合成（Spot + Short Put）の各損益（JPY）。
+    premium は JPY/USD（受取プレミアム）、qty は USD 数量。
+    """
+    spot_pl = (S_T - S0) * qty
+    short_put_pl = (premium - np.maximum(K - S_T, 0.0)) * qty  # 売り：受取 - 支払
+    combo_pl = spot_pl + short_put_pl
+    return {"spot": spot_pl, "short_put": short_put_pl, "combo": combo_pl}
+
+def build_grid_and_rows_put_short(S0, K, premium, qty, smin, smax, points):
+    """Putショート用グリッドとテーブル行。"""
+    if smin >= smax:
+        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
+    points = clamp_points(points)
+    S_T = np.linspace(smin, smax, points)
+    pl = payoff_components_put_short(S_T, S0, K, premium, qty)
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "short_put": float(pl["short_put"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(points)]
+    return S_T, pl, rows
+
+# 描画（Put 売り）
+def draw_chart_put_short(S_T, pl, S0, K, floor_value):
+    """
+    Spot + Short Put（Covered Put）の損益グラフ。Y軸はM表記。
+    """
+    fig = plt.figure(figsize=(7, 4.5), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, pl["spot"],      label="Spot USD P/L (vs today)")
+    ax.plot(S_T, pl["short_put"], label="Short Put P/L (incl. premium)")
+    ax.plot(S_T, pl["combo"],     linewidth=2, label="Spot + Short Put Combo P/L")
+
+    # ← 損益データのみでY軸を決定（Loss floorは無視）
+    _set_ylim_tight(ax, [pl["spot"], pl["short_put"], pl["combo"]])
+
+    # 基準線
+    ax.axhline(0, linewidth=1)
+
+    # 縦の参考線（S0/K）
+    y_top = ax.get_ylim()[1]
+    ax.axvline(S0, linestyle="--", linewidth=1)
+    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(K, linestyle=":", linewidth=1)
+    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
+
+    # Loss floor：レンジ内なら線、外なら注記
+    ymin, ymax = ax.get_ylim()
+    if ymin <= floor_value <= ymax:
+        ax.axhline(floor_value, linestyle=":", linewidth=1)
+    else:
+        ax.annotate(f"Loss floor ≈ {floor_value/1e6:.1f}M (below)",
+                    xy=(S0, ymin), xytext=(6, -14), textcoords="offset points",
+                    va="top", ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Covered Put (Spot + Short Put): P/L vs Terminal USD/JPY")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+def draw_compare_put_short(S_T, combo_pl, finance_cost):
+    """
+    Covered Put Combo と 借入利息の比較（Y軸M表記）。
+    借入利息ラインはレンジ内にあるときだけ描画。レンジ外なら注記。
+    """
+    fig = plt.figure(figsize=(7, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+
+    # 1) まずコンボ線だけ描画し、そのデータでY軸を決める
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Covered Put Combo P/L")
+    _set_ylim_tight(ax, [combo_pl])  # 借入コストはスケーリングに使わない
+
+    # 2) 基準線
+    ax.axhline(0, linewidth=1)
+
+    # 3) 借入利息ライン：レンジ内なら線、外なら注記
+    ymin, ymax = ax.get_ylim()
+    borrow_level = -finance_cost
+    if ymin <= borrow_level <= ymax:
+        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    else:
+        pos = "below" if borrow_level < ymin else "above"
+        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
+                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
+                    xytext=(6, -14 if pos=='below' else 6),
+                    textcoords="offset points", va="top" if pos=='below' else "bottom",
+                    ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Covered Put Combo vs Borrow")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+# 画面ルート（PUT 売り）
+@app.route("/fx/put-sell", methods=["GET", "POST"])
+def fx_put_sell():
+    """
+    Putの売り（ショート）版。
+    Premium は Vol/金利/満期からGK式で算出した理論価格を「受取」として扱う。
+    既存Put買い版と同じ入出力・表示体系。
+    """
+    defaults = dict(
+        S0=150.0, K=148.0,
+        vol=10.0,                 # 年率％
+        r_dom=1.6,                # JPY金利（年率％）
+        r_for=4.2,                # USD金利（年率％）
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,               # 満期（月）
+        borrow_rate=4.2           # 借入年率（％）
+    )
+
+    if request.method == "POST":
+        def fget(name, cast=float, default=None):
+            val = request.form.get(name, "")
+            try:
+                return cast(val)
+            except Exception:
+                return default if default is not None else defaults[name]
+        S0 = fget("S0", float, defaults["S0"])
+        K = fget("K", float, defaults["K"])
+        vol = fget("vol", float, defaults["vol"])
+        r_dom = fget("r_dom", float, defaults["r_dom"])
+        r_for = fget("r_for", float, defaults["r_for"])
+        qty = fget("qty", float, defaults["qty"])
+        smin = fget("smin", float, defaults["smin"])
+        smax = fget("smax", float, defaults["smax"])
+        points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
+    else:
+        S0 = defaults["S0"]; K = defaults["K"]; vol = defaults["vol"]
+        r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
+
+    points = clamp_points(points)
+
+    # GK式で理論プレミアム（JPY/USD）。売りなので「受取」として同額を用いる。
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    premium = garman_kohlhagen_put(S0, K, r_dom/100.0, r_for/100.0, sigma, T)
+
+    # グリッドと損益
+    S_T, pl, rows = build_grid_and_rows_put_short(S0, K, premium, qty, smin, smax, points)
+
+    # ① 理論上の最悪損益（参考）
+    floor_value = (-S0 - K + premium) * qty
+
+    # ② レンジ内の最小損益（画面表示用）
+    idx_min = int(np.argmin(pl["combo"]))
+    range_floor = float(pl["combo"][idx_min])    # 最小損益（JPY）
+    range_floor_st = float(S_T[idx_min])         # その時のレート S_T
+
+    # 受取プレミアムと借入利息（表示用）
+    premium_jpy = premium * qty          # 受取額
+    notional_jpy = S0 * qty
+    premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
+
+    finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
+
+    # メイングラフ
+    fig = draw_chart_put_short(S_T, pl, S0, K, floor_value)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
+    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    # 比較グラフ（Combo vs Borrow）
+    fig_cmp = draw_compare_put_short(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_put_short_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+
+    return render_template(
+        "fx_put_sell.html",
+        png_b64=png_b64,
+        png_b64_put_short_compare=png_b64_put_short_compare,
+        # 入力
+        S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力（算出値）
+        premium=premium,                    # JPY/USD
+        floor=floor_value,                  # 理論 floor（参考）
+        premium_recv=premium_jpy,           # 受取額
+        finance_cost=finance_jpy,
+        premium_pct=premium_pct_of_qty,
+        rows=rows,
+        # 追加（レンジ内の最小値）
+        range_floor=range_floor,
+        range_floor_st=range_floor_st
+    )
+
+# CSV（Put 売り）
+@app.route("/fx/download_csv_put_sell", methods=["POST"])
+def fx_download_csv_put_sell():
+    """
+    Putショート版のグリッドCSVダウンロード。
+    ※ premium は画面側で算出済みの値がPOSTされる前提。
+    """
+    def fget(name, cast=float, default=None):
+        val = request.form.get(name, "")
+        try:
+            return cast(val)
+        except Exception:
+            return default
+
+    S0 = fget("S0", float, 150.0)
+    K = fget("K", float, 148.0)
+    premium = fget("premium", float, 0.74)
+    qty = fget("qty", float, 1_000_000.0)
+    smin = fget("smin", float, 130.0)
+    smax = fget("smax", float, 160.0)
+    points = clamp_points(fget("points", float, 251))
+
+    S_T, pl, _ = build_grid_and_rows_put_short(S0, K, premium, qty, smin, smax, points)
+
+    import csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["S_T(USD/JPY)", "Spot_PnL(JPY)", "ShortPut_PnL(JPY)", "Combo_PnL(JPY)"])
+    for i in range(points):
+        writer.writerow([
+            f"{S_T[i]:.6f}",
+            f"{pl['spot'][i]:.6f}",
+            f"{pl['short_put'][i]:.6f}",
+            f"{pl['combo'][i]:.6f}"
+        ])
+
+    data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
+    data.seek(0)
+    return send_file(
+        data, mimetype="text/csv",
+        as_attachment=True, download_name="covered_put_pnl.csv"
+    )
+
+
+
+# ==================== Call 売り版（Covered Call） ================================================================================================
+
+def payoff_components_call_short(S_T, S0, K, premium, qty):
+    """
+    現物USD（ロング）、コール売り、合成（Spot + Short Call）の各損益（JPY）。
+    premium は JPY/USD（受取プレミアム）、qty は USD 数量。
+    """
+    spot_pl = (S_T - S0) * qty
+    short_call_pl = (premium - np.maximum(S_T - K, 0.0)) * qty  # 売り：受取 - 支払
+    combo_pl = spot_pl + short_call_pl
+    return {"spot": spot_pl, "short_call": short_call_pl, "combo": combo_pl}
+
+def build_grid_and_rows_call_short(S0, K, premium, qty, smin, smax, points):
+    """Callショート用グリッドとテーブル行。"""
+    if smin >= smax:
+        smin, smax = (min(smin, smax), max(smin, smax) + 1.0)
+    points = clamp_points(points)
+    S_T = np.linspace(smin, smax, points)
+    pl = payoff_components_call_short(S_T, S0, K, premium, qty)
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "short_call": float(pl["short_call"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(points)]
+    return S_T, pl, rows
+
+def draw_chart_call_short(S_T, pl, S0, K, floor_value):
+    """
+    Spot + Short Call（Covered Call）の損益グラフ。Y軸はM表記。
+    """
+    fig = plt.figure(figsize=(7, 4.5), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, pl["spot"],        label="Spot USD P/L (vs today)")
+    ax.plot(S_T, pl["short_call"],  label="Short Call P/L (incl. premium)")
+    ax.plot(S_T, pl["combo"], linewidth=2, label="Spot + Short Call Combo P/L")
+
+    # 損益カーブのみでY軸決定（極端値に引っ張られない）
+    _set_ylim_tight(ax, [pl["spot"], pl["short_call"], pl["combo"]])
+
+    ax.axhline(0, linewidth=1)
+
+    y_top = ax.get_ylim()[1]
+    ax.axvline(S0, linestyle="--", linewidth=1)
+    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(K, linestyle=":", linewidth=1)
+    ax.text(K, y_top, f"K={K:.1f}", va="top", ha="left", fontsize=9)
+
+    ymin, ymax = ax.get_ylim()
+    if ymin <= floor_value <= ymax:
+        ax.axhline(floor_value, linestyle=":", linewidth=1)
+    else:
+        ax.annotate(f"Loss floor ≈ {floor_value/1e6:.1f}M (outside range)",
+                    xy=(S0, ymin), xytext=(6, -14), textcoords="offset points",
+                    va="top", ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Covered Call (Spot + Short Call): P/L vs Terminal USD/JPY")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+def draw_compare_call_short(S_T, combo_pl, finance_cost):
+    """
+    Covered Call Combo と 借入利息の比較（Y軸M表記）。
+    借入利息ラインはレンジ内にあるときだけ描画。外なら注記。
+    """
+    fig = plt.figure(figsize=(7, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Covered Call Combo P/L")
+    _set_ylim_tight(ax, [combo_pl])   # 借入コストはスケーリングに使わない
+    ax.axhline(0, linewidth=1)
+
+    ymin, ymax = ax.get_ylim()
+    borrow_level = -finance_cost
+    if ymin <= borrow_level <= ymax:
+        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    else:
+        pos = "below" if borrow_level < ymin else "above"
+        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
+                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
+                    xytext=(6, -14 if pos=='below' else 6),
+                    textcoords="offset points",
+                    va="top" if pos=='below' else "bottom", ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Covered Call Combo vs Borrow")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+@app.route("/fx/call-sell", methods=["GET", "POST"])
+def fx_call_sell():
+    """
+    Callの売り（Covered Call）。
+    Premium は GK式コール理論値を「受取」として扱う。
+    UI・出力は Put売り版と同じ構成。
+    """
+    defaults = dict(
+        S0=150.0, K=152.0,
+        vol=10.0,                 # 年率％
+        r_dom=1.6,                # JPY金利（年率％）
+        r_for=4.2,                # USD金利（年率％）
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,               # 満期（月）
+        borrow_rate=4.2           # 借入年率（％）
+    )
+
+    if request.method == "POST":
+        def fget(name, cast=float, default=None):
+            val = request.form.get(name, "")
+            try: return cast(val)
+            except Exception:
+                return default if default is not None else defaults[name]
+        S0 = fget("S0", float, defaults["S0"])
+        K = fget("K", float, defaults["K"])
+        vol = fget("vol", float, defaults["vol"])
+        r_dom = fget("r_dom", float, defaults["r_dom"])
+        r_for = fget("r_for", float, defaults["r_for"])
+        qty = fget("qty", float, defaults["qty"])
+        smin = fget("smin", float, defaults["smin"])
+        smax = fget("smax", float, defaults["smax"])
+        points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
+    else:
+        S0 = defaults["S0"]; K = defaults["K"]; vol = defaults["vol"]
+        r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
+
+    points = clamp_points(points)
+
+    # GK式コール理論プレミアム（受取）
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    premium = garman_kohlhagen_call(S0, K, r_dom/100.0, r_for/100.0, sigma, T)
+
+    # グリッドと損益
+    S_T, pl, rows = build_grid_and_rows_call_short(S0, K, premium, qty, smin, smax, points)
+
+    # ① 理論上の最悪損益（S_T→0 で最小）：(-S0 + premium) × qty
+    floor_value = (-S0 + premium) * qty
+
+    # ② レンジ内の最小損益（画面表示用）
+    idx_min = int(np.argmin(pl["combo"]))
+    range_floor = float(pl["combo"][idx_min])
+    range_floor_st = float(S_T[idx_min])
+
+    # 受取プレミアムと借入利息（表示用）
+    premium_jpy = premium * qty
+    notional_jpy = S0 * qty
+    premium_pct_of_qty = (premium_jpy / notional_jpy * 100.0) if notional_jpy > 0 else 0.0
+    finance_jpy = qty * S0 * (borrow_rate / 100.0) * (months / 12.0)
+
+    # グラフ
+    fig = draw_chart_call_short(S_T, pl, S0, K, floor_value)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
+    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    fig_cmp = draw_compare_call_short(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_call_short_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+
+    return render_template(
+        "fx_call_sell.html",
+        png_b64=png_b64,
+        png_b64_call_short_compare=png_b64_call_short_compare,
+        # 入力
+        S0=S0, K=K, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力
+        premium=premium,                  # JPY/USD
+        floor=floor_value,                # 理論 floor（参考）
+        premium_recv=premium_jpy,         # 受取額
+        finance_cost=finance_jpy,
+        premium_pct=premium_pct_of_qty,
+        rows=rows,
+        range_floor=range_floor,          # レンジ内最小損益
+        range_floor_st=range_floor_st
+    )
+
+@app.route("/fx/download_csv_call_sell", methods=["POST"])
+def fx_download_csv_call_sell():
+    """Covered Call のグリッドCSVダウンロード。"""
+    def fget(name, cast=float, default=None):
+        val = request.form.get(name, "")
+        try: return cast(val)
+        except Exception: return default
+
+    S0 = fget("S0", float, 150.0)
+    K = fget("K", float, 152.0)
+    premium = fget("premium", float, 0.74)
+    qty = fget("qty", float, 1_000_000.0)
+    smin = fget("smin", float, 130.0)
+    smax = fget("smax", float, 160.0)
+    points = clamp_points(fget("points", float, 251))
+
+    S_T, pl, _ = build_grid_and_rows_call_short(S0, K, premium, qty, smin, smax, points)
+
+    import csv
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["S_T(USD/JPY)", "Spot_PnL(JPY)", "ShortCall_PnL(JPY)", "Combo_PnL(JPY)"])
+    for i in range(points):
+        writer.writerow([
+            f"{S_T[i]:.6f}",
+            f"{pl['spot'][i]:.6f}",
+            f"{pl['short_call'][i]:.6f}",
+            f"{pl['combo'][i]:.6f}"
+        ])
+    data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
+    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="covered_call_pnl.csv")
+#-------------------------------------------------------------------------------------------------------------------------------------------------
+
+
+
 
 
 # =====================================================

@@ -4,64 +4,68 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Finance Suite{% endblock %}</title>
+
+  <!-- Bootstrap & your style -->
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
-
-  <style>
-    /* Hedge Compare を非表示にする (表示したい場合はこのstyleをコメントアウト) */
-    .hedge-compare {
-      display: none !important;
-    }
-  </style>
 
   {% block extra_head %}{% endblock %}
 </head>
 <body class="bg-light">
+
+<!-- ====== Navbar ====== -->
 <nav class="navbar navbar-expand-lg bg-white border-bottom">
   <div class="container">
-    <!-- 左側ロゴ -->
+    <!-- Brand -->
     <a class="navbar-brand fw-bold" href="{{ url_for('home') }}">Finance Suite</a>
 
-    <!-- ナビゲーションボタン -->
-    <div class="d-flex gap-2">
-      <!-- ▼ Hedge Compare ドロップダウン（PUT / CALL を選択） -->
-      <div class="btn-group hedge-compare">
-        <a class="btn btn-sm btn-outline-secondary dropdown-toggle"
-           href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-          Hedge Compare
-        </a>
-        <ul class="dropdown-menu dropdown-menu-end">
-          <li>
-            <a class="dropdown-item" href="{{ url_for('borrow_index') }}">
-              PUT（オプション vs 借入）
-            </a>
-          </li>
-          <li>
-            <a class="dropdown-item" href="{{ url_for('hedge_call') }}">
-              CALL（オプション vs 借入）
-            </a>
-          </li>
-        </ul>
+    <!-- Hamburger (mobile) -->
+    <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#mainNav"
+            aria-controls="mainNav" aria-expanded="false" aria-label="Toggle navigation">
+      <span class="navbar-toggler-icon"></span>
+    </button>
+
+    <!-- Left: buttons (collapse on mobile) -->
+    <div class="collapse navbar-collapse" id="mainNav">
+      <div class="d-flex flex-wrap align-items-center gap-2">
+
+        <!-- long（買い） -->
+        <div class="btn-group btn-group-sm" role="group" aria-label="Long options">
+          <a class="btn btn-outline-secondary" href="{{ url_for('fx_put') }}">FX Put</a>
+          <a class="btn btn-outline-secondary" href="{{ url_for('fx_call') }}">FX Call</a>
+        </div>
+
+        <!-- Separator -->
+        <span class="text-muted d-none d-lg-inline">|</span>
+
+        <!-- short（売り） -->
+        <div class="btn-group btn-group-sm" role="group" aria-label="Short options">
+          <a class="btn btn-outline-secondary" href="{{ url_for('fx_put_sell') }}">FX Put Sell</a>
+          <a class="btn btn-outline-secondary" href="{{ url_for('fx_call_sell') }}">FX Call Sell</a>
+        </div>
+
+        {% if show_fin_tools %}
+        <!-- Separator -->
+        <span class="text-muted d-none d-lg-inline">|</span>
+
+        <!-- 金融電卓 -->
+        <div class="btn-group btn-group-sm" role="group" aria-label="Finance tools">
+          <a class="btn btn-outline-primary" href="{{ url_for('page_savings') }}">貯蓄</a>
+          <a class="btn btn-outline-primary" href="{{ url_for('page_loan') }}">ローン</a>
+          <a class="btn btn-outline-primary" href="{{ url_for('page_drawdown') }}">年金</a>
+        </div>
+        {% endif %}
+
       </div>
 
-      <!-- 既存の個別計算ページ -->
-      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fx_put') }}">FX Put</a>
-      <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('fx_call') }}">FX Call</a>
-
-{% if show_fin_tools %}
-  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_savings') }}">貯蓄</a>
-  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_loan') }}">ローン</a>
-  <a class="btn btn-sm btn-outline-primary" href="{{ url_for('page_drawdown') }}">年金</a>
-{% endif %}
-
-    </div>
-
-    <!-- 右端テキスト -->
-    <div class="ms-auto fw-bold fs-5 text-dark">
-      美浜（株）総合管理部
+      <!-- Right: company label (push to right on lg+) -->
+      <div class="ms-lg-auto mt-2 mt-lg-0 fw-bold fs-5 text-dark">
+        美浜（株）総合管理部
+      </div>
     </div>
   </div>
 </nav>
+<!-- ====== /Navbar ====== -->
 
 <main class="container py-4">
   {% with messages = get_flashed_messages(with_categories=true) %}
@@ -80,7 +84,7 @@
   {% block footer %}&copy; 2025 Finance Suite{% endblock %}
 </footer>
 
-<!-- ▼ Dropdown等の動作用（必須） -->
+<!-- Bootstrap JS -->
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
 </body>
 </html>

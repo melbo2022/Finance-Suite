@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}Covered Put (Short Put) Visualizer{% endblock %}
+{% block content %}
+
+  <div class="mb-3">
+    <h3 class="fw-bold text-primary">Covered Put（Put 売り）</h3>
+  </div>
+
+  <!-- ▼ Parameters -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">Parameters</div>
+    <div class="card-body">
+      <form method="post" action="{{ url_for('fx_put_sell') }}" class="row g-3">
+        <div class="col-6 col-md-2">
+          <label class="form-label">S0 (USD/JPY)</label>
+          <input type="number" step="0.01" class="form-control" name="S0" value="{{ '%.2f'|format(S0) if S0 is defined else '150.00' }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">K (Strike)</label>
+          <input type="number" step="0.01" class="form-control" name="K" value="{{ '%.2f'|format(K) if K is defined else '148.00' }}">
+        </div>
+
+        <!-- Volatility / GK 金利 -->
+        <div class="col-6 col-md-2">
+          <label class="form-label">Volatility (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="vol" value="{{ '%.2f'|format(vol) if vol is defined else '10.00' }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">JPY Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="r_dom" value="{{ '%.2f'|format(r_dom) if r_dom is defined else '1.60' }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">USD Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="r_for" value="{{ '%.2f'|format(r_for) if r_for is defined else '4.20' }}">
+        </div>
+
+        <div class="col-6 col-md-3">
+          <label class="form-label">Quantity (USD)</label>
+          <input type="number" step="1" class="form-control" name="qty" value="{{ '%d'|format(qty) if qty is defined else '1000000' }}">
+        </div>
+
+        <!-- 比較用：借入・表示範囲 -->
+        <div class="col-6 col-md-1">
+          <label class="form-label">Months</label>
+          <input type="number" step="0.1" class="form-control" name="months" value="{{ '%.1f'|format(months) if months is defined else '1.0' }}">
+        </div>
+        <div class="col-6 col-md-2">
+          <label class="form-label">Borrow Rate (% p.a.)</label>
+          <input type="number" step="0.01" class="form-control" name="borrow_rate" value="{{ '%.2f'|format(borrow_rate) if borrow_rate is defined else '4.20' }}">
+        </div>
+
+        <div class="col-6 col-md-1">
+          <label class="form-label">Min</label>
+          <input type="number" step="0.1" class="form-control" name="smin" value="{{ '%.1f'|format(smin) if smin is defined else '130.0' }}">
+        </div>
+        <div class="col-6 col-md-1">
+          <label class="form-label">Max</label>
+          <input type="number" step="0.1" class="form-control" name="smax" value="{{ '%.1f'|format(smax) if smax is defined else '160.0' }}">
+        </div>
+        <div class="col-6 col-md-1">
+          <label class="form-label">Points</label>
+          <input type="number" step="1" class="form-control" name="points" value="{{ '%d'|format(points) if points is defined else '251' }}">
+        </div>
+
+        <div class="col-12">
+          <button class="btn btn-primary">Update Chart</button>
+          <a class="btn btn-outline-secondary ms-2" href="{{ url_for('fx_put') }}">← Put買いページへ</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ▼ サマリー -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-12 col-md-4">
+          <div class="p-3 border rounded-3 h-100">
+            <div class="text-muted small mb-1">オプション受取（プレミアム）</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(premium_recv) if premium_recv is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">
+              ( Premium {{ '%.4f'|format(premium) if premium is defined else '—' }} JPY/USD × {{ '{:,.0f}'.format(qty) }} USD )
+            </div>
+            <div class="text-muted small mt-1">
+              名目比：<b>{{ '%.2f'|format(premium_pct) if premium_pct is defined else '—' }}%</b>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <div class="p-3 border rounded-3 h-100">
+            <div class="text-muted small mb-1">借入利息</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(finance_cost) if finance_cost is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">
+              ( 年率 {{ '%.2f'|format(borrow_rate) }}% × {{ '%.1f'|format(months) }}ヶ月 / 元本：{{ '{:,.0f}'.format(qty * S0) }} JPY )
+            </div>
+          </div>
+        </div>
+
+        <div class="col-12 col-md-4">
+          <div class="p-3 bg-light border rounded-3 h-100">
+            <div class="text-muted small mb-1">レンジ内最小損益</div>
+            <div class="display-6 fw-bold">
+              {{ '{:,.0f}'.format(range_floor) if range_floor is defined else '—' }}
+              <small class="ms-1">JPY</small>
+            </div>
+            <div class="text-muted small mt-1">
+              at S_T = <b>{{ '%.3f'|format(range_floor_st) if range_floor_st is defined else '—' }}</b> (USD/JPY)
+            </div>
+            <div class="text-muted small mt-1">
+              レンジ: {{ '%.1f'|format(smin) }} ～ {{ '%.1f'|format(smax) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▼ メイン損益グラフ -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">損益グラフ (Covered Put: P/L vs Terminal USD/JPY)</div>
+    <div class="card-body">
+      {% if png_b64 %}
+        <img class="img-fluid border" alt="P/L chart" src="data:image/png;base64,{{ png_b64 }}">
+      {% else %}
+        <div class="text-muted">パラメータを送信してください。</div>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- ▼ 比較グラフ（Combo vs Borrow） -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold d-flex align-items-center justify-content-between">
+      <span>ヘッジ比較（Put 売り）: Covered Put Combo vs 借入利息</span>
+      <span class="badge text-bg-secondary">Y-axis: M (百万円)</span>
+    </div>
+    <div class="card-body">
+      {% if png_b64_put_short_compare %}
+        <img class="img-fluid border" alt="Compare Put Short" src="data:image/png;base64,{{ png_b64_put_short_compare }}">
+      {% else %}
+        <div class="text-muted">パラメータを送信すると比較グラフが表示されます。</div>
+      {% endif %}
+      <div class="small text-muted mt-2">
+        借入利息ラインは「元本＝S0×Quantity、年率＝{{ '%.2f'|format(borrow_rate) }}%、期間＝{{ '%.1f'|format(months) }}ヶ月」を仮定。<br>
+        表示単位：<b>M = 百万円</b>
+      </div>
+    </div>
+  </div>
+
+  <!-- ▼ 英語ラベルの日本語解説 -->
+  <div class="card shadow-sm mb-4">
+    <div class="card-header fw-bold">英語ラベルの日本語解説</div>
+    <div class="card-body">
+      <ul>
+        <li><b>Short Put P/L (incl. premium)</b> … プット売りの損益（受取プレミアム込み）。</li>
+        <li><b>Spot + Short Put Combo P/L</b> … ドル現物＋プット売りの合成損益（Covered Put）。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ▼ 計算データ一覧 -->
+  <div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">計算データ一覧</span>
+      <form method="post" action="{{ url_for('fx_download_csv_put_sell') }}" class="m-0">
+        <input type="hidden" name="S0" value="{{ S0 }}">
+        <input type="hidden" name="K" value="{{ K }}">
+        <input type="hidden" name="premium" value="{{ premium }}">
+        <input type="hidden" name="qty" value="{{ qty }}">
+        <input type="hidden" name="smin" value="{{ smin }}">
+        <input type="hidden" name="smax" value="{{ smax }}">
+        <input type="hidden" name="points" value="{{ points }}">
+        <button class="btn btn-sm btn-outline-secondary">CSVダウンロード</button>
+      </form>
+    </div>
+    <div class="card-body table-scroll p-0">
+      <table class="table table-sm table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th>S_T (USD/JPY)</th>
+            <th>Spot P/L (JPY)</th>
+            <th>Short Put P/L (JPY)</th>
+            <th>Combo P/L (JPY)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ '%.3f'|format(r.st) }}</td>
+            <td class="text-end">{{ '{:,.0f}'.format(r.spot) }}</td>
+            <td class="text-end">{{ '{:,.0f}'.format(r.short_put) }}</td>
+            <td class="text-end">{{ '{:,.0f}'.format(r.combo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+{% endblock %}

@@ -7,21 +7,33 @@
   <!-- 金融電卓を表示しない場合は中央寄せ -->
   <div class="row {% if not show_fin_tools %}justify-content-center{% endif %}">
 
-    <!-- FX Options Visualizer -->
+    <!-- FX Options Visualizer（買い系） -->
     <div class="col-md-6 {% if not show_fin_tools %}offset-md-0{% endif %}">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">FX Options Visualizer</h5>
           <p class="card-text small">Protective Put / Call の損益を可視化、CSV出力も可。</p>
-          <a href="{{ url_for('fx_put') }}" class="btn btn-outline-secondary me-2">Put</a>
-          <a href="{{ url_for('fx_call') }}" class="btn btn-outline-success">Call</a>
+          <a href="{{ url_for('fx_put') }}" class="btn btn-outline-secondary me-2">Put（買い）</a>
+          <a href="{{ url_for('fx_call') }}" class="btn btn-outline-success">Call（買い）</a>
+        </div>
+      </div>
+    </div>
+
+    <!-- FX Options Visualizer（売り系） -->
+    <div class="col-md-6 mt-3 mt-md-0">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">FX Options Visualizer（ショート）</h5>
+          <p class="card-text small">Covered Put / Covered Call の損益を可視化、CSV出力も可。</p>
+          <a href="{{ url_for('fx_put_sell') }}" class="btn btn-outline-secondary me-2">Put（売り）</a>
+          <a href="{{ url_for('fx_call_sell') }}" class="btn btn-outline-success">Call（売り）</a>
         </div>
       </div>
     </div>
 
     {% if show_fin_tools %}
     <!-- 金融電卓（表示フラグが True のときだけ出す） -->
-    <div class="col-md-6 mt-3 mt-md-0">
+    <div class="col-md-6 mt-3">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
           <h5 class="card-title">金融電卓</h5>
