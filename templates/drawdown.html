@@ -22,24 +22,24 @@
 
     <div class="col-12 col-md-4">
       <label class="form-label">現在貯蓄 PV</label>
-      <input type="text" name="pv" class="form-control" value="{{ request.form.get('pv','') }}">
+      <input type="text" name="pv" class="form-control" value="{{ request.form.get('pv','70000000') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">毎月取崩額 WD</label>
-      <input type="text" name="withdrawal" class="form-control" value="{{ request.form.get('withdrawal','') }}">
+      <input type="text" name="withdrawal" class="form-control" value="{{ request.form.get('withdrawal','242752') }}">
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">取崩年数（年）</label>
-      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','') }}">
+      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','24') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">年率（%）</label>
-      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','') }}">
+      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','1') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">最終残存額 B</label>
-      <input type="text" name="residual" class="form-control" value="{{ request.form.get('residual','') }}">
+      <input type="text" name="residual" class="form-control" value="{{ request.form.get('residual','10000000') }}">
     </div>
 
     <div class="col-12">

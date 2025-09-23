@@ -19,24 +19,24 @@
 
     <div class="col-12 col-md-4">
       <label class="form-label">借入金額 L</label>
-      <input type="text" name="loan_amount" class="form-control" value="{{ request.form.get('loan_amount','') }}">
+      <input type="text" name="loan_amount" class="form-control" value="{{ request.form.get('loan_amount','105975845') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">返済年数（年）</label>
-      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','') }}">
+      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','45') }}">
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">月額返済額 PMT</label>
-      <input type="text" name="monthly_payment" class="form-control" value="{{ request.form.get('monthly_payment','') }}">
+      <input type="text" name="monthly_payment" class="form-control" value="{{ request.form.get('monthly_payment','270000') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">年率（%）</label>
-      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','') }}">
+      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','1.5') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">最終残存元本（バルーン）B</label>
-      <input type="text" name="residual" class="form-control" value="{{ request.form.get('residual','') }}">
+      <input type="text" name="residual" class="form-control" value="{{ request.form.get('residual','0') }}">
     </div>
 
     <div class="col-12">

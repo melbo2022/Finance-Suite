@@ -31,6 +31,24 @@
       </div>
     </div>
 
+    <!-- ゼロコスト・コリドー -->
+    <div class="col-md-12 mt-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">Zero-Cost Collar</h5>
+          <p class="card-text small">
+            Long/Short を組み合わせたゼロコスト・ヘッジを可視化。4本ラインの損益グラフ、比較グラフ、表（0.25刻み）、CSV出力に対応。
+          </p>
+          <a href="{{ url_for('fx_zero_cost') }}" class="btn btn-outline-primary me-2">
+            ゼロコスト（輸出：Long Put + Short Call）
+          </a>
+          <a href="{{ url_for('fx_zero_cost_long_call') }}" class="btn btn-outline-primary">
+            ゼロコスト（輸入：Long Call + Short Put）
+          </a>
+        </div>
+      </div>
+    </div>
+
     {% if show_fin_tools %}
     <!-- 金融電卓（表示フラグが True のときだけ出す） -->
     <div class="col-md-6 mt-3">

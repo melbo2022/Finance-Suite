@@ -20,24 +20,24 @@
 
     <div class="col-12 col-md-4">
       <label class="form-label">目標FV</label>
-      <input type="text" name="target_fv" class="form-control" value="{{ request.form.get('target_fv','') }}">
+      <input type="text" name="target_fv" class="form-control" value="{{ request.form.get('target_fv','30000000') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">現在元本 PV</label>
-      <input type="text" name="pv" class="form-control" value="{{ request.form.get('pv','') }}">
+      <input type="text" name="pv" class="form-control" value="{{ request.form.get('pv','5000000') }}">
     </div>
 
     <div class="col-12 col-md-4">
       <label class="form-label">毎月拠出 PMT</label>
-      <input type="text" name="pmt" class="form-control" value="{{ request.form.get('pmt','') }}">
+      <input type="text" name="pmt" class="form-control" value="{{ request.form.get('pmt','50000') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">年数（年）</label>
-      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','') }}">
+      <input type="text" name="years" class="form-control" value="{{ request.form.get('years','20') }}">
     </div>
     <div class="col-12 col-md-4">
       <label class="form-label">年率（%）</label>
-      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','') }}">
+      <input type="text" name="annual" class="form-control" value="{{ request.form.get('annual','1.5') }}">
     </div>
 
     <div class="col-12">

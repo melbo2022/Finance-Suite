@@ -37,11 +37,15 @@ app = Flask(__name__)
 app.secret_key = "replace-this-key"
 
 #金融電卓の表示・非表示フラグ-----------------------------------------------------------
-app.config["SHOW_FIN_TOOLS"] = True   # ← 表示したいとき True / 非表示にしたいとき False
+app.config["SHOW_FIN_TOOLS"] = False #←　非表示にするときはFalse
+
+# どのテンプレでも使える共通コンテキスト
 @app.context_processor
 def inject_flags():
-    """全テンプレートで使えるフラグを渡す"""
-    return dict(show_fin_tools=app.config["SHOW_FIN_TOOLS"])
+    return {
+        "show_fin_tools": app.config.get("SHOW_FIN_TOOLS", True)
+    }
+
 #-----------------------------------------------------------------------------------------
 
 # =====================================================
@@ -133,6 +137,21 @@ def garman_kohlhagen_call(S0, K, r_dom, r_for, sigma, T):
     spot_term = S0 * math.exp(-r_for * T) * norm_cdf(d1)
     from_term = K * math.exp(-r_dom * T) * norm_cdf(d2)
     return spot_term - from_term  # JPY per USD
+
+def _arange_inclusive(start: float, stop: float, step: float):
+    """
+    start から stop まで step 刻みで生成（stop を含める）。
+    浮動小数の誤差を吸収するように少し余裕を持って計算します。
+    """
+    if step <= 0:
+        raise ValueError("step must be > 0")
+    if start > stop:
+        start, stop = stop, start
+
+    n = int(np.floor((stop - start) / step + 1e-9)) + 1
+    arr = start + step * np.arange(n)
+    # 誤差で stop を僅かに超える値を除去
+    return arr[arr <= stop + 1e-9]
 
 # ---------------- 損益ロジック ----------------
 def payoff_components_put(S_T, S0, K, premium, qty):
@@ -1035,12 +1054,534 @@ def fx_download_csv_call_sell():
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
     return send_file(data, mimetype="text/csv", as_attachment=True, download_name="covered_call_pnl.csv")
 #-------------------------------------------------------------------------------------------------------------------------------------------------
-
-
-
-
-
+# ==債権ヘッジ===================================================
+# ================= Zero-Cost（Collar） ================
 # =====================================================
+
+# 損益ロジック（ゼロコスト：Long Put + Short Call）
+def payoff_components_zero_cost(S_T, S0, Kp, Kc, prem_put, prem_call, qty):
+    """
+    現物USD（ロング）、プット買い、コール売り、合成（Spot + Long Put + Short Call）の各損益（JPY）。
+    prem_put / prem_call は JPY/USD（Putは支払=マイナス、Callは受取=プラスの向きに注意）
+      - Long Put P/L  = (-prem_put + max(Kp - S_T, 0)) * qty
+      - Short Call P/L= ( prem_call - max(S_T - Kc, 0)) * qty
+    """
+    spot_pl       = (S_T - S0) * qty
+    long_put_pl   = (-prem_put + np.maximum(Kp - S_T, 0.0)) * qty
+    short_call_pl = ( prem_call - np.maximum(S_T - Kc, 0.0)) * qty
+    combo_pl      = spot_pl + long_put_pl + short_call_pl
+    return {
+        "spot": spot_pl,
+        "long_put": long_put_pl,
+        "short_call": short_call_pl,
+        "combo": combo_pl
+    }
+
+
+def build_grid_and_rows_zero_cost(
+    S0, Kp, Kc, prem_put, prem_call, qty,
+    smin, smax, points, step: float = 0.25
+):
+    """
+    ゼロコスト用のレートグリッドを 0.25 刻みで生成し、行データを返す。
+    points は互換のため受け取るが、刻み幅優先のため実際の点数は step で決まる。
+    """
+    if smin > smax:
+        smin, smax = smax, smin
+
+    S_T = _arange_inclusive(float(smin), float(smax), float(step))
+    pl = payoff_components_zero_cost(S_T, S0, Kp, Kc, prem_put, prem_call, qty)
+
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "long_put": float(pl["long_put"][i]),
+        "short_call": float(pl["short_call"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(len(S_T))]
+
+    return S_T, pl, rows
+
+
+# 描画（ゼロコスト：Spot/Put/Call/Comboの4本）
+def draw_chart_zero_cost(S_T, pl, S0, Kp, Kc):
+    """
+    Zero-Cost Collar の損益グラフ。Y軸はM表記。
+    4本表示：Spot（黒）/ Long Put（青）/ Short Call（赤）/ Combo（緑）
+    """
+    fig = plt.figure(figsize=(7.5, 4.8), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, pl["spot"],        label="Spot USD P/L (vs today)", color="black")
+    ax.plot(S_T, pl["long_put"],    label="Long Put P/L",            color="blue")
+    ax.plot(S_T, pl["short_call"],  label="Short Call P/L",          color="red")
+    ax.plot(S_T, pl["combo"],       label="Combo (Spot+Put-Call)",   color="green", linewidth=2)
+
+    _set_ylim_tight(ax, [pl["spot"], pl["long_put"], pl["short_call"], pl["combo"]])
+    ax.axhline(0, linewidth=1)
+
+    # 縦の参考線（S0/Kp/Kc）
+    y_top = ax.get_ylim()[1]
+    ax.axvline(S0, linestyle="--", linewidth=1)
+    ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(Kp, linestyle=":", linewidth=1)
+    ax.text(Kp, y_top, f"Kp={Kp:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(Kc, linestyle=":", linewidth=1)
+    ax.text(Kc, y_top, f"Kc={Kc:.1f}", va="top", ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Zero-Cost Collar: Spot + Long Put + Short Call (P/L)")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def draw_compare_zero_cost(S_T, combo_pl, finance_cost):
+    """
+    合成（Zero-Cost Combo）と 借入利息の比較（Y軸M表記）。
+    借入利息ラインはレンジ内にあるときだけ描画。レンジ外なら注記。
+    """
+    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Zero-Cost Combo P/L")
+    _set_ylim_tight(ax, [combo_pl])
+    ax.axhline(0, linewidth=1)
+
+    ymin, ymax = ax.get_ylim()
+    borrow_level = -finance_cost
+    if ymin <= borrow_level <= ymax:
+        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    else:
+        pos = "below" if borrow_level < ymin else "above"
+        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
+                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
+                    xytext=(6, -14 if pos=='below' else 6),
+                    textcoords="offset points",
+                    va="top" if pos=='below' else "bottom",
+                    ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Zero-Cost Combo vs Borrow")
+    _format_y_as_m(ax)
+    ax.legend(loc="best")
+    ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+
+# 画面ルート（ゼロコスト）
+@app.route("/fx/zero-cost", methods=["GET", "POST"])
+def fx_zero_cost():
+    """
+    ゼロコスト・コリドー（Long Put + Short Call）の損益を表示。
+    Premium は GK式で算出（JPY/USD）。理想は prem_call ≈ prem_put（純額≈0）。
+    既存Put売り版と同じ入出力・表示体系。
+    """
+    defaults = dict(
+        S0=150.0, Kp=148.0, Kc=152.0,
+        vol=10.0,                 # 年率％
+        r_dom=1.6,                # JPY金利（年率％）
+        r_for=4.2,                # USD金利（年率％）
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,               # 満期（月）
+        borrow_rate=4.2           # 借入年率（％）
+    )
+
+    if request.method == "POST":
+        def fget(name, cast=float, default=None):
+            val = request.form.get(name, "")
+            try:
+                return cast(val)
+            except Exception:
+                return default if default is not None else defaults[name]
+        S0     = fget("S0", float, defaults["S0"])
+        Kp     = fget("Kp", float, defaults["Kp"])
+        Kc     = fget("Kc", float, defaults["Kc"])
+        vol    = fget("vol", float, defaults["vol"])
+        r_dom  = fget("r_dom", float, defaults["r_dom"])
+        r_for  = fget("r_for", float, defaults["r_for"])
+        qty    = fget("qty", float, defaults["qty"])
+        smin   = fget("smin", float, defaults["smin"])
+        smax   = fget("smax", float, defaults["smax"])
+        points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
+    else:
+        S0 = defaults["S0"]; Kp = defaults["Kp"]; Kc = defaults["Kc"]
+        vol = defaults["vol"]; r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
+
+    points = clamp_points(points)
+
+    # GK式で理論プレミアム（JPY/USD）
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    prem_put  = garman_kohlhagen_put(S0, Kp, r_dom/100.0, r_for/100.0, sigma, T)   # 支払（Long Put）
+    prem_call = garman_kohlhagen_call(S0, Kc, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Call）
+
+    # ネット・プレミアム（JPY/USD）…理想は ≈ 0
+    premium_net = prem_call - prem_put
+
+    # グリッドと損益
+    S_T, pl, rows = build_grid_and_rows_zero_cost(S0, Kp, Kc, prem_put, prem_call, qty, smin, smax, points)
+
+    # レンジ内の最小損益（参考表示）
+    idx_min = int(np.argmin(pl["combo"]))
+    range_floor     = float(pl["combo"][idx_min])    # 最小損益（JPY）
+    range_floor_st  = float(S_T[idx_min])            # その時のレート S_T
+
+    # プレミアム金額（JPY）
+    prem_put_jpy   = prem_put * qty       # 支払（Long Put）
+    prem_call_jpy  = prem_call * qty      # 受取（Short Call）
+    premium_net_jpy = prem_call_jpy - prem_put_jpy   # ≈ 0 が理想
+
+    # 借入利息（表示用）
+    notional_jpy = S0 * qty
+    finance_jpy = notional_jpy * (borrow_rate / 100.0) * (months / 12.0)
+
+    # グラフ①（4本）
+    fig = draw_chart_zero_cost(S_T, pl, S0, Kp, Kc)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
+    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    # グラフ②（Combo vs Borrow）
+    fig_cmp = draw_compare_zero_cost(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_zero_cost_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+
+    return render_template(
+        "fx_zero_cost.html",
+        png_b64=png_b64,
+        png_b64_zero_cost_compare=png_b64_zero_cost_compare,
+        # 入力
+        S0=S0, Kp=Kp, Kc=Kc, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力（算出値）
+        prem_put=prem_put, prem_call=prem_call, premium_net=premium_net,   # JPY/USD
+        prem_put_jpy=prem_put_jpy, prem_call_jpy=prem_call_jpy, premium_net_jpy=premium_net_jpy,
+        finance_cost=finance_jpy,
+        range_floor=range_floor, range_floor_st=range_floor_st,
+        rows=rows
+    )
+
+
+# CSV（ゼロコスト）
+@app.route("/fx/download_csv_zero_cost", methods=["POST"])
+def fx_download_csv_zero_cost():
+    """
+    Zero-Cost（Collar）のグリッドCSVダウンロード。
+    prem_put / prem_call は JPY/USD（画面側で算出済みの値がPOSTされる想定）。
+    出力列: S_T(USD/JPY), Spot_PnL(JPY), LongPut_PnL(JPY), ShortCall_PnL(JPY), Combo_PnL(JPY)
+    レート刻みは 0.25 固定。
+    """
+    def fget(name, cast=float, default=None):
+        val = request.form.get(name, "")
+        try:
+            return cast(val)
+        except Exception:
+            return default
+
+    S0        = fget("S0", float, 150.0)
+    Kp        = fget("Kp", float, 148.0)
+    Kc        = fget("Kc", float, 152.0)
+    prem_put  = fget("prem_put", float, 0.80)   # JPY/USD
+    prem_call = fget("prem_call", float, 0.80)  # JPY/USD
+    qty       = fget("qty", float, 1_000_000.0)
+    smin      = fget("smin", float, 130.0)
+    smax      = fget("smax", float, 160.0)
+    points    = fget("points", float, 251)      # 互換のため受け取るが、実際は step 優先
+    step      = 0.25
+
+    # 0.25刻みでグリッド生成
+    S_T, pl, _ = build_grid_and_rows_zero_cost(
+        S0, Kp, Kc, prem_put, prem_call, qty, smin, smax, points, step=step
+    )
+
+    import csv, io
+    # UTF-8 with BOM でExcelでも文字化けしないように出力
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(["S_T(USD/JPY)", "Spot_PnL(JPY)", "LongPut_PnL(JPY)", "ShortCall_PnL(JPY)", "Combo_PnL(JPY)"])
+    for i in range(len(S_T)):
+        writer.writerow([
+            f"{S_T[i]:.6f}",
+            f"{pl['spot'][i]:.6f}",
+            f"{pl['long_put'][i]:.6f}",
+            f"{pl['short_call'][i]:.6f}",
+            f"{pl['combo'][i]:.6f}",
+        ])
+
+    data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
+    data.seek(0)
+    return send_file(
+        data,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="zero_cost_collar_pnl.csv",
+    )
+
+# =================================================＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝====
+# ===== Zero-Cost（Long Call + Short Put：輸入向け）=====
+# =====================================================
+
+# ===== Zero-Cost（Long Call + Short Put：輸入向け）=====
+# =====================================================
+
+def payoff_components_zero_cost_longcall(S_T, S0, Kp, Kc, prem_call, prem_put, qty):
+    """
+    輸入実需を想定：基準は USD ショート。
+    prem_call/prem_put は JPY/USD（Callは支払=マイナス、Putは受取=プラス）。
+      Long Call P/L  = (-prem_call + max(S_T - Kc, 0)) * qty
+      Short Put  P/L = ( prem_put   - max(Kp - S_T, 0)) * qty
+    """
+    # ★変更：USDショート基準（円安でコスト増 → P/Lはマイナス）にする
+    spot_pl       = -(S_T - S0) * qty
+
+    long_call_pl  = (-prem_call + np.maximum(S_T - Kc, 0.0)) * qty
+    short_put_pl  = ( prem_put   - np.maximum(Kp - S_T, 0.0)) * qty
+    combo_pl      = spot_pl + long_call_pl + short_put_pl
+    return {
+        "spot": spot_pl,
+        "long_call": long_call_pl,
+        "short_put": short_put_pl,
+        "combo": combo_pl
+    }
+
+
+def build_grid_and_rows_zero_cost_longcall(
+    S0, Kp, Kc, prem_call, prem_put, qty, smin, smax, points, step: float = 0.25
+):
+    """ゼロコスト（Long Call + Short Put）用グリッドと行データ。レートは0.25刻み。"""
+    if smin > smax:
+        smin, smax = smax, smin
+    S_T = _arange_inclusive(float(smin), float(smax), float(step))
+    pl = payoff_components_zero_cost_longcall(S_T, S0, Kp, Kc, prem_call, prem_put, qty)
+    rows = [{
+        "st": float(S_T[i]),
+        "spot": float(pl["spot"][i]),
+        "long_call": float(pl["long_call"][i]),
+        "short_put": float(pl["short_put"][i]),
+        "combo": float(pl["combo"][i]),
+    } for i in range(len(S_T))]
+    return S_T, pl, rows
+
+
+def draw_chart_zero_cost_longcall(S_T, pl, S0, Kp, Kc):
+    """
+    損益グラフ（4本表示）：Short USD（黒）/ Long Call（青）/ Short Put（赤）/ Combo（緑）
+    """
+    fig = plt.figure(figsize=(7.5, 4.8), dpi=120)
+    ax = fig.add_subplot(111)
+
+    # ★変更：凡例を Short USD に
+    ax.plot(S_T, pl["spot"],       label="Short USD P/L (Importer baseline)", color="black")
+    ax.plot(S_T, pl["long_call"],  label="Long Call P/L",                     color="blue")
+    ax.plot(S_T, pl["short_put"],  label="Short Put P/L",                     color="red")
+    ax.plot(S_T, pl["combo"],      label="Combo (Short USD + Call - Put)",    color="green", linewidth=2)
+
+    _set_ylim_tight(ax, [pl["spot"], pl["long_call"], pl["short_put"], pl["combo"]])
+    ax.axhline(0, linewidth=1)
+
+    y_top = ax.get_ylim()[1]
+    ax.axvline(S0, linestyle="--", linewidth=1); ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(Kp, linestyle=":",  linewidth=1); ax.text(Kp, y_top, f"Kp={Kp:.1f}", va="top", ha="left", fontsize=9)
+    ax.axvline(Kc, linestyle=":",  linewidth=1); ax.text(Kc, y_top, f"Kc={Kc:.1f}", va="top", ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Zero-Cost (Importer): Short USD + Long Call + Short Put (P/L)")
+    _format_y_as_m(ax)
+    ax.legend(loc="best"); ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+
+def draw_compare_zero_cost_longcall(S_T, combo_pl, finance_cost):
+    """
+    合成（Zero-Cost Combo）と 借入利息の比較（Y軸M表記）。
+    """
+    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
+    ax = fig.add_subplot(111)
+
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Zero-Cost Combo P/L")
+    _set_ylim_tight(ax, [combo_pl])
+    ax.axhline(0, linewidth=1)
+
+    ymin, ymax = ax.get_ylim()
+    borrow_level = -finance_cost
+    if ymin <= borrow_level <= ymax:
+        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    else:
+        pos = "below" if borrow_level < ymin else "above"
+        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
+                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
+                    xytext=(6, -14 if pos=='below' else 6),
+                    textcoords="offset points",
+                    va="top" if pos=='below' else "bottom",
+                    ha="left", fontsize=9)
+
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
+    ax.set_ylabel("P/L (JPY)")
+    ax.set_title("Compare: Zero-Cost (Importer) Combo vs Borrow")
+    _format_y_as_m(ax)
+    ax.legend(loc="best"); ax.grid(True, linewidth=0.3)
+    fig.tight_layout()
+    return fig
+
+
+@app.route("/fx/zero-cost-call", methods=["GET", "POST"])
+def fx_zero_cost_long_call():
+    """
+    ゼロコスト（Long Call + Short Put）。輸入企業が円安リスクをヘッジする想定。
+    Premium は GK式で算出。理想は prem_put ≈ prem_call（純額≈0）。
+    """
+    defaults = dict(
+        S0=150.0, Kp=148.0, Kc=152.0,
+        vol=10.0, r_dom=1.6, r_for=4.2,
+        qty=1_000_000,
+        smin=130.0, smax=160.0, points=251,
+        months=1.0,
+        borrow_rate=4.2
+    )
+
+    if request.method == "POST":
+        def fget(name, cast=float, default=None):
+            val = request.form.get(name, "")
+            try:
+                return cast(val)
+            except Exception:
+                return default if default is not None else defaults[name]
+        S0     = fget("S0", float, defaults["S0"])
+        Kp     = fget("Kp", float, defaults["Kp"])   # Put strike（Short）
+        Kc     = fget("Kc", float, defaults["Kc"])   # Call strike（Long）
+        vol    = fget("vol", float, defaults["vol"])
+        r_dom  = fget("r_dom", float, defaults["r_dom"])
+        r_for  = fget("r_for", float, defaults["r_for"])
+        qty    = fget("qty", float, defaults["qty"])
+        smin   = fget("smin", float, defaults["smin"])
+        smax   = fget("smax", float, defaults["smax"])
+        points = int(fget("points", float, defaults["points"]))
+        months = fget("months", float, defaults["months"])
+        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
+    else:
+        S0 = defaults["S0"]; Kp = defaults["Kp"]; Kc = defaults["Kc"]
+        vol = defaults["vol"]; r_dom = defaults["r_dom"]; r_for = defaults["r_for"]
+        qty = defaults["qty"]; smin = defaults["smin"]; smax = defaults["smax"]
+        points = defaults["points"]; months = defaults["months"]; borrow_rate = defaults["borrow_rate"]
+
+    points = clamp_points(points)
+
+    # GK式プレミアム（JPY/USD）
+    T = max(months, 0.0001) / 12.0
+    sigma = max(vol, 0.0) / 100.0
+    prem_call = garman_kohlhagen_call(S0, Kc, r_dom/100.0, r_for/100.0, sigma, T)  # 支払（Long Call）
+    prem_put  = garman_kohlhagen_put(S0, Kp, r_dom/100.0, r_for/100.0, sigma, T)   # 受取（Short Put）
+
+    premium_net = prem_put - prem_call  # （受取−支払）≈ 0 が理想
+
+    # グリッドと損益（0.25刻み）
+    S_T, pl, rows = build_grid_and_rows_zero_cost_longcall(
+        S0, Kp, Kc, prem_call, prem_put, qty, smin, smax, points, step=0.25
+    )
+
+    # レンジ内最小損益（参考）
+    idx_min = int(np.argmin(pl["combo"]))
+    range_floor    = float(pl["combo"][idx_min])
+    range_floor_st = float(S_T[idx_min])
+
+    # 金額換算
+    prem_call_jpy   = prem_call * qty   # 支払
+    prem_put_jpy    = prem_put  * qty   # 受取
+    premium_net_jpy = prem_put_jpy - prem_call_jpy
+
+    notional_jpy = S0 * qty
+    finance_jpy  = notional_jpy * (borrow_rate / 100.0) * (months / 12.0)
+
+    # グラフ①（4本）
+    fig = draw_chart_zero_cost_longcall(S_T, pl, S0, Kp, Kc)
+    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
+    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+
+    # グラフ②（Combo vs Borrow）
+    fig_cmp = draw_compare_zero_cost_longcall(S_T, pl["combo"], finance_jpy)
+    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
+    png_b64_zero_cost_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+
+    return render_template(
+        "fx_zero_cost_long_call.html",
+        png_b64=png_b64,
+        png_b64_zero_cost_compare=png_b64_zero_cost_compare,
+        # 入力
+        S0=S0, Kp=Kp, Kc=Kc, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        # 出力
+        prem_call=prem_call, prem_put=prem_put, premium_net=premium_net,  # JPY/USD
+        prem_call_jpy=prem_call_jpy, prem_put_jpy=prem_put_jpy, premium_net_jpy=premium_net_jpy,
+        finance_cost=finance_jpy,
+        range_floor=range_floor, range_floor_st=range_floor_st,
+        rows=rows
+    )
+
+
+@app.route("/fx/download_csv_zero_cost_longcall", methods=["POST"])
+def fx_download_csv_zero_cost_longcall():
+    """
+    Zero-Cost（Long Call + Short Put）版のCSV。
+    出力: S_T, ShortUSD_PnL, LongCall_PnL, ShortPut_PnL, Combo_PnL（JPY）
+    """
+    def fget(name, cast=float, default=None):
+        val = request.form.get(name, "")
+        try:
+            return cast(val)
+        except Exception:
+            return default
+
+    S0        = fget("S0", float, 150.0)
+    Kp        = fget("Kp", float, 148.0)
+    Kc        = fget("Kc", float, 152.0)
+    prem_call = fget("prem_call", float, 0.80)  # JPY/USD（支払）
+    prem_put  = fget("prem_put",  float, 0.80)  # JPY/USD（受取）
+    qty       = fget("qty", float, 1_000_000.0)
+    smin      = fget("smin", float, 130.0)
+    smax      = fget("smax", float, 160.0)
+    points    = fget("points", float, 251)
+    step      = 0.25
+
+    S_T, pl, _ = build_grid_and_rows_zero_cost_longcall(
+        S0, Kp, Kc, prem_call, prem_put, qty, smin, smax, points, step=step
+    )
+
+    import csv, io
+    buf = io.StringIO()
+    writer = csv.writer(buf, lineterminator="\n")
+    writer.writerow(["S_T(USD/JPY)", "ShortUSD_PnL(JPY)", "LongCall_PnL(JPY)", "ShortPut_PnL(JPY)", "Combo_PnL(JPY)"])
+    for i in range(len(S_T)):
+        writer.writerow([
+            f"{S_T[i]:.6f}",
+            f"{pl['spot'][i]:.6f}",
+            f"{pl['long_call'][i]:.6f}",
+            f"{pl['short_put'][i]:.6f}",
+            f"{pl['combo'][i]:.6f}",
+        ])
+
+    data = io.BytesIO(buf.getvalue().encode("utf-8-sig"))
+    data.seek(0)
+    return send_file(
+        data,
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name="zero_cost_longcall_pnl.csv",
+    )
+
+
+# ===============================================================================================================================================
 # ============== Investment calculators ===============
 # =====================================================
 
@@ -1120,7 +1661,6 @@ def build_balance_series_loan(L0: float, PMT: float, r_m: float, n: int):
         S = S * (1.0 + r_m) - PMT
         series.append(S)
     return series
-#--------------------------------------------------------------------------------------------------------------------
 
 #---------------------------------------------------------------------------------------------------------------------
 @app.route("/savings", methods=["GET", "POST"])
