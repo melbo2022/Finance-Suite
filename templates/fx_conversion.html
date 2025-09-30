@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Conversion{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h3 class="mb-3">Conversion（Long Spot + Long Put@K + Short Call@K）</h3>
+
+  <!-- 入力 -->
+  <form method="post" class="row g-3">
+    <div class="col-md-2"><label class="form-label">S0</label><input name="S0" class="form-control" type="number" step="0.1" value="{{ S0 }}"></div>
+    <div class="col-md-2"><label class="form-label">K</label><input name="K" class="form-control" type="number" step="0.1" value="{{ K }}"></div>
+    <div class="col-md-2"><label class="form-label">Vol (%/年)</label><input name="vol" class="form-control" type="number" step="0.1" value="{{ vol }}"></div>
+    <div class="col-md-2"><label class="form-label">r_dom JPY (%/年)</label><input name="r_dom" class="form-control" type="number" step="0.1" value="{{ r_dom }}"></div>
+    <div class="col-md-2"><label class="form-label">r_for USD (%/年)</label><input name="r_for" class="form-control" type="number" step="0.1" value="{{ r_for }}"></div>
+    <div class="col-md-2"><label class="form-label">数量 (USD)</label><input name="qty" class="form-control" type="number" step="1" value="{{ qty }}"></div>
+    <div class="col-md-2"><label class="form-label">満期 (月)</label><input name="months" class="form-control" type="number" step="0.1" value="{{ months }}"></div>
+    <div class="col-md-2"><label class="form-label">S最小</label><input name="smin" class="form-control" type="number" step="0.1" value="{{ smin }}"></div>
+    <div class="col-md-2"><label class="form-label">S最大</label><input name="smax" class="form-control" type="number" step="0.1" value="{{ smax }}"></div>
+    <div class="col-md-2"><label class="form-label">ポイント数</label><input name="points" class="form-control" type="number" step="1" value="{{ points }}"></div>
+    <div class="col-12"><button class="btn btn-primary">描画</button></div>
+  </form>
+
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">オプション純額（Call − Put）</div>
+            <div class="fs-3 fw-bold">{{ "{:,.0f}".format(premium_net_jpy) }} JPY</div>
+            <div class="small mt-1 text-muted">
+              受取（Call）: {{ "{:,.0f}".format(prem_call_jpy) }} ／ 支払（Put）: {{ "{:,.0f}".format(prem_put_jpy) }}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">理論合成損益（フラット）</div>
+            <div class="fs-5 fw-bold">{{ "{:,.0f}".format(flat_pl) }} JPY</div>
+            <div class="small mt-1 text-muted">= (K − S0 + Call − Put) × 数量</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">レンジ内損益（参考）</div>
+            <div class="fs-6">最大 {{ "{:,.0f}".format(range_cap) }} JPY at {{ "{:.3f}".format(range_cap_st) }}<br>最小 {{ "{:,.0f}".format(range_floor) }} JPY at {{ "{:.3f}".format(range_floor_st) }}</div>
+            <div class="small text-muted">※理論上は一定（同値）</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 損益グラフ -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益グラフ（Conversion）</div>
+    <div class="card-body"><div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+      <img class="img-fluid border rounded w-100" alt="conversion-plot" src="data:image/png;base64,{{ png_b64 }}">
+    </div></div></div>
+  </div>
+
+  <!-- 損益分岐点フォーカス -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益分岐点（Break-even）</div>
+    <div class="card-body"><div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+      <img class="img-fluid border rounded w-100" alt="conversion-be" src="data:image/png;base64,{{ png_b64_be }}">
+    </div></div></div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead><tr><th>S_T</th><th>Spot_PnL</th><th>LongPut_PnL</th><th>ShortCall_PnL</th><th>Combo_PnL</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ "%.3f"|format(r.st) }}</td>
+          <td>{{ "{:,.0f}".format(r.spot) }}</td>
+          <td>{{ "{:,.0f}".format(r.long_put) }}</td>
+          <td>{{ "{:,.0f}".format(r.short_call) }}</td>
+          <td>{{ "{:,.0f}".format(r.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CSV -->
+  <form method="post" action="{{ url_for('fx_download_csv_conversion') }}">
+    <input type="hidden" name="S0" value="{{ S0 }}"><input type="hidden" name="K" value="{{ K }}">
+    <input type="hidden" name="prem_put" value="{{ prem_put }}"><input type="hidden" name="prem_call" value="{{ prem_call }}">
+    <input type="hidden" name="qty" value="{{ qty }}"><input type="hidden" name="smin" value="{{ smin }}"><input type="hidden" name="smax" value="{{ smax }}"><input type="hidden" name="points" value="{{ points }}">
+    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Iron Butterfly{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h3 class="mb-3">アイアン・バタフライ（Long Put K1 + Short Put/Call Kmid + Long Call K4）</h3>
+
+  <!-- 入力フォーム -->
+  <form method="post" class="row g-3">
+    <div class="col-md-2"><label class="form-label">S0 (USD/JPY)</label><input name="S0" class="form-control" type="number" step="0.1" value="{{ S0 }}"></div>
+    <div class="col-md-2"><label class="form-label">K1 (Long Put)</label><input name="K1" class="form-control" type="number" step="0.1" value="{{ K1 }}"></div>
+    <div class="col-md-2"><label class="form-label">Kmid (Short Put/Call)</label><input name="Kmid" class="form-control" type="number" step="0.1" value="{{ Kmid }}"></div>
+    <div class="col-md-2"><label class="form-label">K4 (Long Call)</label><input name="K4" class="form-control" type="number" step="0.1" value="{{ K4 }}"></div>
+    <div class="col-md-2"><label class="form-label">Vol (%/年)</label><input name="vol" class="form-control" type="number" step="0.1" value="{{ vol }}"></div>
+    <div class="col-md-2"><label class="form-label">r_dom JPY (%/年)</label><input name="r_dom" class="form-control" type="number" step="0.1" value="{{ r_dom }}"></div>
+    <div class="col-md-2"><label class="form-label">r_for USD (%/年)</label><input name="r_for" class="form-control" type="number" step="0.1" value="{{ r_for }}"></div>
+    <div class="col-md-2"><label class="form-label">数量 (USD)</label><input name="qty" class="form-control" type="number" step="1" value="{{ qty }}"></div>
+    <div class="col-md-2"><label class="form-label">満期 (月)</label><input name="months" class="form-control" type="number" step="0.1" value="{{ months }}"></div>
+    <div class="col-md-2"><label class="form-label">S最小</label><input name="smin" class="form-control" type="number" step="0.1" value="{{ smin }}"></div>
+    <div class="col-md-2"><label class="form-label">S最大</label><input name="smax" class="form-control" type="number" step="0.1" value="{{ smax }}"></div>
+    <div class="col-md-2"><label class="form-label">ポイント数</label><input name="points" class="form-control" type="number" step="1" value="{{ points }}"></div>
+    <div class="col-12"><button class="btn btn-primary">描画</button></div>
+  </form>
+
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <!-- クレジット -->
+        <div class="col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">受取クレジット</div>
+            <div class="fs-3 fw-bold">{{ "{:,.0f}".format(credit_jpy) }} JPY</div>
+            <div class="small mt-1 text-muted">
+              = (Short Put(Kmid) + Short Call(Kmid)) − (Long Put(K1) + Long Call(K4))<br>
+              名目比: {{ "{:.2f}".format((credit_jpy/(S0*qty)*100.0) if S0*qty>0 else 0) }}%
+            </div>
+          </div>
+        </div>
+        <!-- 最大損失 -->
+        <div class="col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">最大損失（参考）</div>
+            <div class="fs-3 fw-bold">{{ "{:,.0f}".format(max_loss_jpy) }} JPY</div>
+            <div class="small mt-1 text-muted">
+              翼幅（下/上）: {{ "{:.2f}".format(wing_lower) }} / {{ "{:.2f}".format(wing_upper) }}<br>
+              Max(翼幅) − Credit
+            </div>
+          </div>
+        </div>
+        <!-- 損益分岐点 -->
+        <div class="col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">損益分岐点（USD/JPY）</div>
+            <div class="fs-5 fw-bold">Lower: {{ "{:.3f}".format(be_low) }} / Upper: {{ "{:.3f}".format(be_high) }}</div>
+            <div class="small mt-1 text-muted">= Kmid − Credit / Kmid + Credit</div>
+          </div>
+        </div>
+        <!-- レンジ内 P/L -->
+        <div class="col-md-3">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">レンジ内損益</div>
+            <div class="fs-6">
+              最大 {{ "{:,.0f}".format(range_cap) }} JPY at {{ "{:.3f}".format(range_cap_st) }}<br>
+              最小 {{ "{:,.0f}".format(range_floor) }} JPY at {{ "{:.3f}".format(range_floor_st) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- グラフ(1)：損益 -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益グラフ（Iron Butterfly）</div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-12 col-lg-10 col-xl-9 mx-auto">
+          <img class="img-fluid border rounded w-100" alt="iron-bfly-plot"
+               src="data:image/png;base64,{{ png_b64 }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- グラフ(2)：損益分岐点 -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益分岐点（Break-even）</div>
+    <div class="card-body">
+      <div class="row">
+        <div class="col-12 col-lg-10 col-xl-9 mx-auto">
+          <img class="img-fluid border rounded w-100" alt="iron-bfly-be"
+               src="data:image/png;base64,{{ png_b64_iron_bfly_be }}">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 英語ラベルの日本語解説 -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">英語ラベルの日本語解説</div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><b>Long/Short Put/Call P/L</b> … 各レッグの損益（プレミアム込み）。</li>
+        <li><b>Combo (Iron Butterfly)</b> … 合成損益（4本の合計）。</li>
+        <li><b>Break-even</b> … 下側 = Kmid − Credit、上側 = Kmid + Credit。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead>
+        <tr>
+          <th>S_T (USD/JPY)</th>
+          <th>LongPutK1_PnL (JPY)</th>
+          <th>ShortPutKmid_PnL (JPY)</th>
+          <th>ShortCallKmid_PnL (JPY)</th>
+          <th>LongCallK4_PnL (JPY)</th>
+          <th>Combo_PnL (JPY)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ "%.3f"|format(r.st) }}</td>
+          <td>{{ "{:,.0f}".format(r.long_put_k1) }}</td>
+          <td>{{ "{:,.0f}".format(r.short_put_kmid) }}</td>
+          <td>{{ "{:,.0f}".format(r.short_call_kmid) }}</td>
+          <td>{{ "{:,.0f}".format(r.long_call_k4) }}</td>
+          <td>{{ "{:,.0f}".format(r.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CSVダウンロード -->
+  <form method="post" action="{{ url_for('fx_download_csv_iron_butterfly') }}">
+    <input type="hidden" name="K1" value="{{ K1 }}">
+    <input type="hidden" name="Kmid" value="{{ Kmid }}">
+    <input type="hidden" name="K4" value="{{ K4 }}">
+    <input type="hidden" name="prem_p1" value="{{ prem_p1 }}">
+    <input type="hidden" name="prem_pmid" value="{{ prem_pmid }}">
+    <input type="hidden" name="prem_cmid" value="{{ prem_cmid }}">
+    <input type="hidden" name="prem_c4" value="{{ prem_c4 }}">
+    <input type="hidden" name="qty" value="{{ qty }}">
+    <input type="hidden" name="smin" value="{{ smin }}">
+    <input type="hidden" name="smax" value="{{ smax }}">
+    <input type="hidden" name="points" value="{{ points }}">
+    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+  </form>
+</div>
+{% endblock %}

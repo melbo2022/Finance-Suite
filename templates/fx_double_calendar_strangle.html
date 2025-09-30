@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}Double Calendar (Strangle){% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <h3 class="mb-3">ダブル・カレンダー（ストラングル）― Long Far (Kc/Kp) / Short Near (Kc/Kp)</h3>
+
+  <!-- 入力フォーム -->
+  <form method="post" class="row g-3">
+    <div class="col-md-2"><label class="form-label">S0</label><input name="S0" class="form-control" type="number" step="0.1" value="{{ S0 }}"></div>
+    <div class="col-md-2"><label class="form-label">Kc (Call)</label><input name="Kc" class="form-control" type="number" step="0.1" value="{{ Kc }}"></div>
+    <div class="col-md-2"><label class="form-label">Kp (Put)</label><input name="Kp" class="form-control" type="number" step="0.1" value="{{ Kp }}"></div>
+
+    <div class="col-md-2"><label class="form-label">Vol Near (%/年)</label><input name="vol_near" class="form-control" type="number" step="0.1" value="{{ vol_near }}"></div>
+    <div class="col-md-2"><label class="form-label">Vol Far (%/年)</label><input name="vol_far" class="form-control" type="number" step="0.1" value="{{ vol_far }}"></div>
+
+    <div class="col-md-2"><label class="form-label">r_dom JPY (%/年)</label><input name="r_dom" class="form-control" type="number" step="0.1" value="{{ r_dom }}"></div>
+    <div class="col-md-2"><label class="form-label">r_for USD (%/年)</label><input name="r_for" class="form-control" type="number" step="0.1" value="{{ r_for }}"></div>
+
+    <div class="col-md-2"><label class="form-label">数量 (USD)</label><input name="qty" class="form-control" type="number" step="1" value="{{ qty }}"></div>
+    <div class="col-md-2"><label class="form-label">Near 満期 (月)</label><input name="months_near" class="form-control" type="number" step="0.1" value="{{ months_near }}"></div>
+    <div class="col-md-2"><label class="form-label">Far 満期 (月)</label><input name="months_far" class="form-control" type="number" step="0.1" value="{{ months_far }}"></div>
+
+    <div class="col-md-2"><label class="form-label">S最小</label><input name="smin" class="form-control" type="number" step="0.1" value="{{ smin }}"></div>
+    <div class="col-md-2"><label class="form-label">S最大</label><input name="smax" class="form-control" type="number" step="0.1" value="{{ smax }}"></div>
+    <div class="col-md-2"><label class="form-label">ポイント数</label><input name="points" class="form-control" type="number" step="1" value="{{ points }}"></div>
+
+    <div class="col-12"><button class="btn btn-primary">描画</button></div>
+  </form>
+
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">初期純額（Near 売り − Far 買い）</div>
+            <div class="fs-3 fw-bold">{{ "{:,.0f}".format(premium_net_jpy) }} JPY</div>
+            <div class="small text-muted">( {{ "{:.4f}".format(premium_net_per_usd) }} JPY/USD )</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">損益分岐点（近満期）</div>
+            <div class="fs-6">
+              {% if be_vals|length == 0 %}—{% else %}
+                {{ be_vals|map('float')|map('round', 3)|list|join(' / ') }}
+              {% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">レンジ内損益（参考）</div>
+            <div class="fs-6">
+              最大 {{ "{:,.0f}".format(range_cap) }} JPY @ {{ "{:.3f}".format(range_cap_st) }}<br>
+              最小 {{ "{:,.0f}".format(range_floor) }} JPY @ {{ "{:.3f}".format(range_floor_st) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 損益グラフ -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益グラフ（Double Calendar: Strangle）</div>
+    <div class="card-body">
+      <div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+        <img class="img-fluid border rounded w-100" alt="double-calendar-strangle-plot" src="data:image/png;base64,{{ png_b64 }}">
+      </div></div>
+    </div>
+  </div>
+
+  <!-- 損益分岐点 -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益分岐点（Break-even, 近満期）</div>
+    <div class="card-body">
+      <div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+        <img class="img-fluid border rounded w-100" alt="double-calendar-strangle-be" src="data:image/png;base64,{{ png_b64_be }}">
+      </div></div>
+    </div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead>
+        <tr>
+          <th>S_T</th><th>NearCall_PnL</th><th>NearPut_PnL</th><th>FarCall_PnL</th><th>FarPut_PnL</th><th>Combo_PnL</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ "%.3f"|format(r.st) }}</td>
+          <td>{{ "{:,.0f}".format(r.near_call) }}</td>
+          <td>{{ "{:,.0f}".format(r.near_put) }}</td>
+          <td>{{ "{:,.0f}".format(r.far_call) }}</td>
+          <td>{{ "{:,.0f}".format(r.far_put) }}</td>
+          <td>{{ "{:,.0f}".format(r.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CSV -->
+  <form method="post" action="{{ url_for('fx_download_csv_double_calendar_strangle') }}">
+    <input type="hidden" name="S0" value="{{ S0 }}">
+    <input type="hidden" name="Kc" value="{{ Kc }}"><input type="hidden" name="Kp" value="{{ Kp }}">
+    <input type="hidden" name="vol_near" value="{{ vol_near }}"><input type="hidden" name="vol_far" value="{{ vol_far }}">
+    <input type="hidden" name="r_dom" value="{{ r_dom }}"><input type="hidden" name="r_for" value="{{ r_for }}">
+    <input type="hidden" name="qty" value="{{ qty }}">
+    <input type="hidden" name="months_near" value="{{ months_near }}"><input type="hidden" name="months_far" value="{{ months_far }}">
+    <input type="hidden" name="smin" value="{{ smin }}"><input type="hidden" name="smax" value="{{ smax }}"><input type="hidden" name="points" value="{{ points }}">
+    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+  </form>
+</div>
+{% endblock %}

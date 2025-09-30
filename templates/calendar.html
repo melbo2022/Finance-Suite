@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% block title %}Calendar{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-2">
+    <h3 class="mb-0">カレンダー（{{ year }}年 {{ month }}月）</h3>
+    <div class="d-flex align-items-center gap-2">
+      <a class="btn btn-outline-secondary btn-sm" href="{{ prev_url }}">« 前月</a>
+      <a class="btn btn-outline-secondary btn-sm" href="{{ next_url }}">翌月 »</a>
+    </div>
+  </div>
+
+  <!-- 入力フォーム -->
+  <form method="post" class="row g-3 mb-3">
+    <div class="col-6 col-md-2">
+      <label class="form-label">年</label>
+      <input name="year" class="form-control" type="number" step="1" value="{{ year }}" min="1900" max="2100">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label">月</label>
+      <input name="month" class="form-control" type="number" step="1" value="{{ month }}" min="1" max="12">
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label">週の起点</label>
+      <select name="start_week" class="form-select">
+        <option value="mon" {{ "selected" if start_week=="mon" else "" }}>月曜はじまり</option>
+        <option value="sun" {{ "selected" if start_week=="sun" else "" }}>日曜はじまり</option>
+      </select>
+    </div>
+    <div class="col-6 col-md-2">
+      <label class="form-label">週番号</label>
+      <select name="show_weeknums" class="form-select">
+        <option value="1" {{ "selected" if show_weeknums else "" }}>表示する</option>
+        <option value="0" {{ "" if show_weeknums else "selected" }}>表示しない</option>
+      </select>
+    </div>
+    <div class="col-12 col-md-4">
+      <label class="form-label">祝日（任意・カンマ区切り）</label>
+      <input name="holidays" class="form-control" type="text" placeholder="YYYY-MM-DD, YYYY-MM-DD, ..."
+             value="{{ holidays_csv }}">
+      <div class="form-text">例）2025-01-01, 2025-02-11</div>
+    </div>
+    <div class="col-12">
+      <button class="btn btn-primary">更新</button>
+    </div>
+  </form>
+
+  <!-- カレンダー -->
+  <div class="table-responsive">
+    <table class="table table-bordered align-middle small mb-0">
+      <thead class="table-light">
+        <tr>
+          {% if show_weeknums %}
+            <th class="text-center" style="width:3.5rem;">週</th>
+          {% endif %}
+          {% for h in headers %}
+            <th class="text-center">{{ h }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for wk in weeks %}
+          <tr>
+            {% if show_weeknums %}
+              <td class="text-center text-muted">{{ wk.iso_week }}</td>
+            {% endif %}
+            {% for d in wk.days %}
+              {% set cls = [] %}
+              {% if not d.in_month %}{% set _ = cls.append("text-muted bg-light") %}{% endif %}
+              {% if d.is_weekend %}{% set _ = cls.append("bg-weekend") %}{% endif %}
+              {% if d.is_holiday %}{% set _ = cls.append("bg-holiday") %}{% endif %}
+              {% if d.is_today %}{% set _ = cls.append("border border-2 border-primary") %}{% endif %}
+              <td class="{{ ' '.join(cls) }}" style="height:4rem; vertical-align:top;">
+                <div class="d-flex justify-content-between">
+                  <span class="fw-semibold">{{ d.date.day }}</span>
+                  {% if d.is_today %}<span class="badge text-bg-primary">Today</span>{% endif %}
+                </div>
+              </td>
+            {% endfor %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- 凡例 & CSV -->
+  <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mt-2">
+    <div class="small text-muted">
+      <span class="legend legend-weekend me-3">週末</span>
+      <span class="legend legend-holiday me-3">祝日</span>
+      <span class="legend legend-today">本日枠</span>
+    </div>
+    <form method="post" action="{{ url_for('download_csv_calendar') }}">
+      <input type="hidden" name="year" value="{{ year }}">
+      <input type="hidden" name="month" value="{{ month }}">
+      <input type="hidden" name="start_week" value="{{ start_week }}">
+      <input type="hidden" name="show_weeknums" value="{{ 1 if show_weeknums else 0 }}">
+      <input type="hidden" name="holidays" value="{{ holidays_csv }}">
+      <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+    </form>
+  </div>
+</div>
+
+<!-- ちょい足しスタイル -->
+<style>
+  .bg-weekend { background-color: rgba(0,0,0,.02); }
+  .bg-holiday { background-color: rgba(255,0,0,.08); }
+  .legend { display:inline-block; padding:.15rem .5rem; border-radius:.25rem; background:#f8f9fa; border:1px solid #e9ecef; }
+  .legend-weekend{ box-shadow: inset 0 0 0 9999px rgba(0,0,0,.02); }
+  .legend-holiday{ box-shadow: inset 0 0 0 9999px rgba(255,0,0,.08); }
+  .legend-today{ border:2px solid #0d6efd; }
+</style>
+{% endblock %}

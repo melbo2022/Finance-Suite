@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h2>Participating Collar（輸入向け）</h2>
+
+  <form method="post" class="row g-3 mb-4">
+    <div class="col-md-3">
+      <label for="S0" class="form-label">Spot (S0)</label>
+      <input type="number" step="0.01" class="form-control" name="S0" value="{{ S0 }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="Kc" class="form-label">Call Strike (Kc)</label>
+      <input type="number" step="0.01" class="form-control" name="Kc" value="{{ Kc }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="Kp" class="form-label">Put Strike (Kp)</label>
+      <input type="number" step="0.01" class="form-control" name="Kp" value="{{ Kp }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="r" class="form-label">参加率 r (0〜1)</label>
+      <input type="number" step="0.01" min="0" max="1" class="form-control" name="r" value="{{ r }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="vol" class="form-label">Volatility (%)</label>
+      <input type="number" step="0.1" class="form-control" name="vol" value="{{ vol }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="r_dom" class="form-label">JPY Rate (%)</label>
+      <input type="number" step="0.1" class="form-control" name="r_dom" value="{{ r_dom }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="r_for" class="form-label">USD Rate (%)</label>
+      <input type="number" step="0.1" class="form-control" name="r_for" value="{{ r_for }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="months" class="form-label">Tenor (months)</label>
+      <input type="number" step="0.1" class="form-control" name="months" value="{{ months }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="qty" class="form-label">Notional (USD)</label>
+      <input type="number" step="1000" class="form-control" name="qty" value="{{ qty }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="smin" class="form-label">Min Rate</label>
+      <input type="number" step="0.1" class="form-control" name="smin" value="{{ smin }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="smax" class="form-label">Max Rate</label>
+      <input type="number" step="0.1" class="form-control" name="smax" value="{{ smax }}">
+    </div>
+
+    <div class="col-md-3">
+      <label for="points" class="form-label">Grid Points</label>
+      <input type="number" step="1" class="form-control" name="points" value="{{ points }}">
+    </div>
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">計算する</button>
+      <button type="submit" formaction="{{ url_for('fx_download_csv_pc_importer') }}" class="btn btn-outline-secondary ms-2">
+        CSVダウンロード
+      </button>
+    </div>
+  </form>
+
+  <!-- 結果表示 -->
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h5>プレミアム</h5>
+        <p>Call Premium: {{ "{:,.6f}".format(prem_call|default(0)) }} USD ({{ "{:,.0f}".format(prem_call_jpy|default(0)) }} JPY)</p>
+        <p>Put Premium: {{ "{:,.6f}".format(prem_put|default(0)) }} USD ({{ "{:,.0f}".format(prem_put_jpy|default(0)) }} JPY)</p>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h5>Break-even</h5>
+        <p>Lower: {{ "{:,.2f}".format(be_low  or 0) }}</p>
+        <p>Upper: {{ "{:,.2f}".format(be_high or 0) }}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- グラフ表示 -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益グラフ</h5>
+      <img src="data:image/png;base64,{{ png_b64 }}" class="img-fluid" alt="P/L chart">
+    </div>
+  </div>
+
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益分岐点グラフ</h5>
+      <img src="data:image/png;base64,{{ png_b64_be }}" class="img-fluid" alt="Break-even chart">
+    </div>
+  </div>
+
+  <!-- 損益テーブル -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益テーブル</h5>
+      <table class="table table-sm table-bordered">
+        <thead>
+          <tr>
+            <th>Spot</th>
+            <th>Long Call</th>
+            <th>Short Put × r</th>
+            <th>Spot Short</th>
+            <th>Combo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ "{:,.2f}".format(row.st) }}</td>
+            <td>{{ "{:,.0f}".format(row.long_call) }}</td>
+            <td>{{ "{:,.0f}".format(row.short_put) }}</td>
+            <td>{{ "{:,.0f}".format(row.spot) }}</td>
+            <td>{{ "{:,.0f}".format(row.combo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

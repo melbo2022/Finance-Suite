@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+{% block title %}Calendar Spread{% endblock %}
+
+{% block content %}
+<div class="container py-3">
+  <h3 class="mb-3">Calendar Spread（近月ショート + 遠月ロング｜T1評価）</h3>
+
+  <!-- 入力 -->
+  <form method="post" class="row g-3">
+    <div class="col-md-2">
+      <label class="form-label">タイプ</label>
+      <select name="opt_type" class="form-select">
+        <option value="call" {{ "selected" if opt_type=="call" else "" }}>Call</option>
+        <option value="put"  {{ "selected" if opt_type=="put"  else "" }}>Put</option>
+      </select>
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">S0 (USD/JPY)</label>
+      <input name="S0" class="form-control" type="number" step="0.1" value="{{ S0 }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">K（近月）</label>
+      <input name="K_near" class="form-control" type="number" step="0.1" value="{{ K_near }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">K（遠月）</label>
+      <input name="K_far" class="form-control" type="number" step="0.1" value="{{ K_far }}">
+      <div class="form-text">同スト or ダイアゴナル</div>
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">Vol 近月 (%/年)</label>
+      <input name="vol_near" class="form-control" type="number" step="0.1" value="{{ vol_near }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Vol 遠月 (%/年)</label>
+      <input name="vol_far" class="form-control" type="number" step="0.1" value="{{ vol_far }}">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">r_dom JPY (%/年)</label>
+      <input name="r_dom" class="form-control" type="number" step="0.1" value="{{ r_dom }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">r_for USD (%/年)</label>
+      <input name="r_for" class="form-control" type="number" step="0.1" value="{{ r_for }}">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">数量 (USD)</label>
+      <input name="qty" class="form-control" type="number" step="1" value="{{ qty }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">T1 近月 (月)</label>
+      <input name="months_near" class="form-control" type="number" step="0.1" value="{{ months_near }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">T2 遠月 (月)</label>
+      <input name="months_far" class="form-control" type="number" step="0.1" value="{{ months_far }}">
+    </div>
+
+    <div class="col-md-2">
+      <label class="form-label">S最小</label>
+      <input name="smin" class="form-control" type="number" step="0.1" value="{{ smin }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">S最大</label>
+      <input name="smax" class="form-control" type="number" step="0.1" value="{{ smax }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">ポイント数</label>
+      <input name="points" class="form-control" type="number" step="1" value="{{ points }}">
+    </div>
+
+    <div class="col-12">
+      <button class="btn btn-primary">描画</button>
+    </div>
+  </form>
+
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">初期プレミアム（JPY）</div>
+            <div class="fs-6">
+              近月 受取：{{ "{:,.0f}".format(prem_near_jpy) }} ／ 遠月 支払：{{ "{:,.0f}".format(prem_far_jpy) }}
+            </div>
+            <div class="small mt-1 text-muted">
+              純額（遠−近）：<b>{{ "{:,.0f}".format(premium_net_jpy) }} JPY</b>
+              <span class="text-muted">（{{ "{:.4f}".format(premium_net) }} JPY/USD）</span>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">損益分岐点（T1時点）</div>
+            <div class="fs-6">
+              BE1：{% if be1 is not none %}{{ "{:.3f}".format(be1) }}{% else %}—{% endif %} /
+              BE2：{% if be2 is not none %}{{ "{:.3f}".format(be2) }}{% else %}—{% endif %}
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">レンジ内損益（参考）</div>
+            <div class="fs-6">
+              最大 {{ "{:,.0f}".format(range_cap) }} JPY @ {{ "{:.3f}".format(range_cap_st) }}<br>
+              最小 {{ "{:,.0f}".format(range_floor) }} JPY @ {{ "{:.3f}".format(range_floor_st) }}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 損益グラフ -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益グラフ（T1評価）</div>
+    <div class="card-body">
+      <div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+        <img class="img-fluid border rounded w-100" alt="calendar-spread-plot" src="data:image/png;base64,{{ png_b64 }}">
+      </div></div>
+    </div>
+  </div>
+
+  <!-- 損益分岐点フォーカス -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益分岐点（Break-even）</div>
+    <div class="card-body">
+      <div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+        <img class="img-fluid border rounded w-100" alt="calendar-spread-be" src="data:image/png;base64,{{ png_b64_be }}">
+      </div></div>
+    </div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead><tr>
+        <th>S_T@T1 (USD/JPY)</th><th>NearShort_PnL (JPY)</th><th>FarLong_MtM_PnL (JPY)</th><th>Combo_PnL (JPY)</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ "%.3f"|format(r.st) }}</td>
+          <td>{{ "{:,.0f}".format(r.near_short) }}</td>
+          <td>{{ "{:,.0f}".format(r.far_long) }}</td>
+          <td>{{ "{:,.0f}".format(r.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CSV -->
+  <form method="post" action="{{ url_for('fx_download_csv_calendar_spread') }}">
+    <input type="hidden" name="opt_type" value="{{ opt_type }}">
+    <input type="hidden" name="S0" value="{{ S0 }}">
+    <input type="hidden" name="K_near" value="{{ K_near }}">
+    <input type="hidden" name="K_far" value="{{ K_far }}">
+    <input type="hidden" name="prem_near" value="{{ prem_near }}">
+    <input type="hidden" name="prem_far" value="{{ prem_far }}">
+    <!-- CSV側で必要な残存パラメータも渡しておく（既定値フォールバックあり） -->
+    <input type="hidden" name="rD" value="{{ r_dom/100.0 }}">
+    <input type="hidden" name="rF" value="{{ r_for/100.0 }}">
+    <input type="hidden" name="sigma_far" value="{{ vol_far/100.0 }}">
+    <input type="hidden" name="T_rem" value="{{ (months_far - months_near)/12.0 }}">
+    <input type="hidden" name="qty" value="{{ qty }}">
+    <input type="hidden" name="smin" value="{{ smin }}">
+    <input type="hidden" name="smax" value="{{ smax }}">
+    <input type="hidden" name="points" value="{{ points }}">
+    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+  </form>
+
+  <!-- 用語補足 -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">補足</div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><b>Long Calendar</b>：近月ショート／遠月ロング。T1時点で近月は満期、遠月は残存T2−T1の理論価値を評価。</li>
+        <li>同ストライク（K同一）だけでなく<b>ダイアゴナル</b>（K違い）も可。</li>
+        <li>図は<b>T1での損益</b>（初期プレミアムのキャッシュフローを含むMtM）。</li>
+      </ul>
+    </div>
+  </div>
+</div>
+{% endblock %}

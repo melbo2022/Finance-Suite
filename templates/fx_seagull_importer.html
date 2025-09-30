@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="container mt-4">
+  <h2>シーガル（輸入向け：-Spot + Long Call + Short Put(Kp1) + Long Put(Kp2)）</h2>
+
+  <form method="post" class="row g-3 mb-4">
+    <div class="col-md-3">
+      <label class="form-label">S0 (USD/JPY)</label>
+      <input type="number" step="0.01" class="form-control" name="S0" value="{{ S0 }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kp2 (Long Put)</label>
+      <input type="number" step="0.01" class="form-control" name="Kp2" value="{{ Kp2 }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kp1 (Short Put)</label>
+      <input type="number" step="0.01" class="form-control" name="Kp1" value="{{ Kp1 }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Kc (Long Call)</label>
+      <input type="number" step="0.01" class="form-control" name="Kc" value="{{ Kc }}">
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">Vol (%/年)</label>
+      <input type="number" step="0.1" class="form-control" name="vol" value="{{ vol }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">r_dom JPY (%/年)</label>
+      <input type="number" step="0.1" class="form-control" name="r_dom" value="{{ r_dom }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">r_for USD (%/年)</label>
+      <input type="number" step="0.1" class="form-control" name="r_for" value="{{ r_for }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">満期 (月)</label>
+      <input type="number" step="0.1" class="form-control" name="months" value="{{ months }}">
+    </div>
+
+    <div class="col-md-3">
+      <label class="form-label">数量 (USD)</label>
+      <input type="number" step="1000" class="form-control" name="qty" value="{{ qty }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">S最小</label>
+      <input type="number" step="0.1" class="form-control" name="smin" value="{{ smin }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">S最大</label>
+      <input type="number" step="0.1" class="form-control" name="smax" value="{{ smax }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">ポイント数</label>
+      <input type="number" step="1" class="form-control" name="points" value="{{ points }}">
+    </div>
+
+    <div class="col-12">
+      <button type="submit" class="btn btn-primary">計算する</button>
+      <button type="submit" formaction="{{ url_for('fx_download_csv_seagull_importer') }}"
+              class="btn btn-outline-secondary ms-2">
+        CSVダウンロード
+      </button>
+    </div>
+  </form>
+
+  <!-- プレミアム情報 -->
+  <div class="row">
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h5>プレミアム</h5>
+        <p>Long Call (Kc): {{ "{:,.6f}".format(prem_call|default(0)) }} USD
+           ({{ "{:,.0f}".format(prem_call_jpy|default(0)) }} JPY)</p>
+        <p>Short Put (Kp1): {{ "{:,.6f}".format(prem_put_sp|default(0)) }} USD 受取
+           ({{ "{:,.0f}".format(prem_put_sp_jpy|default(0)) }} JPY)</p>
+        <p>Long Put (Kp2): {{ "{:,.6f}".format(prem_put_lp|default(0)) }} USD
+           ({{ "{:,.0f}".format(prem_put_lp_jpy|default(0)) }} JPY)</p>
+        <hr class="my-2">
+        <p>Net Premium: {{ "{:,.6f}".format(premium_net|default(0)) }} USD
+           ({{ "{:,.0f}".format(premium_net_jpy|default(0)) }} JPY)</p>
+      </div>
+    </div>
+    <div class="col-md-6">
+      <div class="card p-3">
+        <h5>Break-even</h5>
+        <p>Lower: {{ "{:,.2f}".format(be_low  or 0) }}</p>
+        <p>Upper: {{ "{:,.2f}".format(be_high or 0) }}</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- グラフ -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益グラフ</h5>
+      <img src="data:image/png;base64,{{ png_b64 }}" class="img-fluid" alt="P/L chart">
+    </div>
+  </div>
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益分岐点グラフ</h5>
+      <img src="data:image/png;base64,{{ png_b64_be }}" class="img-fluid" alt="Break-even chart">
+    </div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="row mt-4">
+    <div class="col-12">
+      <h5>損益テーブル</h5>
+      <table class="table table-sm table-bordered">
+        <thead>
+          <tr>
+            <th>Spot</th>
+            <th>Spot Short</th>
+            <th>Long Call(Kc)</th>
+            <th>Short Put(Kp1)</th>
+            <th>Long Put(Kp2)</th>
+            <th>Combo</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td>{{ "{:,.2f}".format(row.st) }}</td>
+            <td>{{ "{:,.0f}".format(row.spot) }}</td>
+            <td>{{ "{:,.0f}".format(row.long_call) }}</td>
+            <td>{{ "{:,.0f}".format(row.short_put) }}</td>
+            <td>{{ "{:,.0f}".format(row.long_put2) }}</td>
+            <td>{{ "{:,.0f}".format(row.combo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

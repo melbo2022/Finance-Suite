@@ -27,7 +27,7 @@ app = Flask(__name__)
 app.secret_key = "replace-this-key"
 
 #金融電卓の表示・非表示フラグ-----------------------------------------------------------
-app.config["SHOW_FIN_TOOLS"] = False #←　非表示にするときはFalse
+app.config["SHOW_FIN_TOOLS"] = True #←　非表示にするときはFalse
 
 # どのテンプレでも使える共通コンテキスト
 @app.context_processor
@@ -289,22 +289,21 @@ def draw_compare_put(S_T, combo_pl, finance_cost):
     fig.tight_layout()
     return fig
 
-def draw_compare_call(S_T, combo_pl, finance_cost=None):
+def draw_compare_call(S_T, combo_pl, finance_cost):
     """
-    Protective Call 合成 P/L のみを表示（借入利息ラインなし）。
-    finance_cost は後方互換のため未使用。
+    Protective Call Combo と 借入利息(一定額) の比較グラフ。
+    借入利息ラインは -finance_cost の水平線。
     """
     fig = plt.figure(figsize=(7, 4.0), dpi=120)
     ax = fig.add_subplot(111)
-
-    # 合成ラインのみ（緑）
-    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Protective Call Combo P/L")
+    ax.plot(S_T, combo_pl, linewidth=2,color="green",label="Protective Call Combo P/L")
+    ax.axhline(-finance_cost, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
     ax.axhline(0, linewidth=1)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Protective Call: Combo P/L")
-    _format_y_as_m(ax)
+    ax.set_title("Compare: Call Combo vs Borrow")
+    _format_y_as_m(ax)  # ★ M表記
     ax.legend(loc="best")
     ax.grid(True, linewidth=0.3)
     fig.tight_layout()
@@ -1388,25 +1387,35 @@ def draw_chart_zero_cost_longcall(S_T, pl, S0, Kp, Kc):
     return fig
 
 
-def draw_compare_zero_cost_longcall(S_T, combo_pl, finance_cost=None):
+def draw_compare_zero_cost_longcall(S_T, combo_pl, finance_cost):
     """
-    Zero-Cost（Importer/Long Call 版）の合成P/Lのみ表示（借入利息ラインなし）。
-    finance_cost は後方互換のため未使用。
+    合成（Zero-Cost Combo）と 借入利息の比較（Y軸M表記）。
     """
     fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
     ax = fig.add_subplot(111)
 
-    # 合成ラインのみ（緑）
     ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Zero-Cost Combo P/L")
     _set_ylim_tight(ax, [combo_pl])
     ax.axhline(0, linewidth=1)
 
+    ymin, ymax = ax.get_ylim()
+    borrow_level = -finance_cost
+    if ymin <= borrow_level <= ymax:
+        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
+    else:
+        pos = "below" if borrow_level < ymin else "above"
+        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
+                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
+                    xytext=(6, -14 if pos=='below' else 6),
+                    textcoords="offset points",
+                    va="top" if pos=='below' else "bottom",
+                    ha="left", fontsize=9)
+
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Zero-Cost (Importer) Combo P/L")
+    ax.set_title("Compare: Zero-Cost (Importer) Combo vs Borrow")
     _format_y_as_m(ax)
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
+    ax.legend(loc="best"); ax.grid(True, linewidth=0.3)
     fig.tight_layout()
     return fig
 
@@ -4383,44 +4392,20 @@ def draw_chart_seagull(S_T, pl, S0, Kp, Kc1, Kc2, be_vals):
     return fig
 
 
-def draw_seagull_breakeven(S_T, combo_pl, be_vals, finance_cost=None):
+def draw_seagull_breakeven(S_T, combo_pl, be_vals):
     """
-    Seagull の合成P/Lと損益分岐点をフォーカス表示。
-    finance_cost が与えられたら、-finance_cost の水平ライン（青の破線）も描画する。
+    Seagull の合成P/Lと損益分岐点をフォーカス表示
     """
     fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
     ax = fig.add_subplot(111)
 
-    # Y範囲決定に借入ラインも考慮
-    ys = [combo_pl]
-    borrow_level = None
-    if finance_cost is not None:
-        borrow_level = -float(finance_cost)
-        ys.append(np.full_like(S_T, borrow_level, dtype=float))
-
     ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Seagull Combo P/L")
-    _set_ylim_tight(ax, ys)
-    ax.axhline(0, linewidth=1)
+    _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
 
     y_top = ax.get_ylim()[1]
     for i, be in enumerate(be_vals):
         ax.axvline(be, linestyle="--", linewidth=1.5, label=f"BE{i+1}")
         ax.text(be, y_top, f"BE{ i+1 }={be:.2f}", va="top", ha="left", fontsize=9)
-
-    # 支払利息ライン（青の破線）…レンジ外なら注記
-    if borrow_level is not None:
-        ymin, ymax = ax.get_ylim()
-        if ymin <= borrow_level <= ymax:
-            ax.axhline(borrow_level, linestyle="--", linewidth=1.5, color="blue",
-                       label="Borrow Cost (flat)")
-        else:
-            pos = "below" if borrow_level < ymin else "above"
-            ax.annotate(f"Borrow ≈ {borrow_level/1e6:.1f}M ({pos})",
-                        xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
-                        xytext=(6, -14 if pos=='below' else 6),
-                        textcoords="offset points",
-                        va="top" if pos=='below' else "bottom",
-                        ha="left", fontsize=9, color="blue")
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
@@ -4436,15 +4421,13 @@ def fx_seagull():
     """
     Seagull（Long Put Kp + Short Call Kc1 + Long Call Kc2）の損益を表示。
     Premium は GK式（JPY/USD）。
-    損益分岐点フォーカスには「支払利息ライン（青破線）」を表示可能。
     """
     defaults = dict(
         S0=150.0, Kp=148.0, Kc1=152.0, Kc2=155.0,
         vol=10.0, r_dom=1.6, r_for=4.2,
         qty=1_000_000,
         smin=140.0, smax=162.0, points=353,
-        months=1.0,
-        borrow_rate=4.2,   # ← 追加：借入年率（％）
+        months=1.0
     )
 
     if request.method == "POST":
@@ -4464,13 +4447,11 @@ def fx_seagull():
         smax = fget("smax", float, defaults["smax"])
         points = int(fget("points", float, defaults["points"]))
         months = fget("months", float, defaults["months"])
-        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])  # ← 追加
     else:
         S0=defaults["S0"]; Kp=defaults["Kp"]; Kc1=defaults["Kc1"]; Kc2=defaults["Kc2"]
         vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
         qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
         points=defaults["points"]; months=defaults["months"]
-        borrow_rate=defaults["borrow_rate"]  # ← 追加
 
     points = clamp_points(points)
 
@@ -4481,7 +4462,8 @@ def fx_seagull():
     prem_call1 = garman_kohlhagen_call(S0, Kc1, r_dom/100.0, r_for/100.0, sigma, T)
     prem_call2 = garman_kohlhagen_call(S0, Kc2, r_dom/100.0, r_for/100.0, sigma, T)
 
-    # ネット・プレミアム（受取 − 支払） = Short Call(Kc1) − Long Put(Kp) − Long Call(Kc2)
+    # ネット・プレミアム（受取 − 支払）
+    # = Short Call(Kc1) − Long Put(Kp) − Long Call(Kc2)
     premium_net = prem_call1 - prem_put - prem_call2
     premium_net_jpy = premium_net * qty
 
@@ -4498,17 +4480,13 @@ def fx_seagull():
     range_floor, range_floor_st = float(pl["combo"][idx_min]), float(S_T[idx_min])
     range_cap,   range_cap_st   = float(pl["combo"][idx_max]), float(S_T[idx_max])
 
-    # 支払利息（JPY）…損益分岐点フォーカスに水平ライン（青破線）で表示
-    notional_jpy = S0 * qty
-    finance_jpy = notional_jpy * (borrow_rate / 100.0) * (months / 12.0)
-
     # グラフ①：全体P/L
     fig = draw_chart_seagull(S_T, pl, S0, Kp, Kc1, Kc2, be_vals)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    # グラフ②：損益分岐点フォーカス（Borrow Cost ライン付き・青破線）
-    fig_be = draw_seagull_breakeven(S_T, pl["combo"], be_vals, finance_cost=finance_jpy)
+    # グラフ②：損益分岐点フォーカス
+    fig_be = draw_seagull_breakeven(S_T, pl["combo"], be_vals)
     buf2 = io.BytesIO(); fig_be.savefig(buf2, format="png"); plt.close(fig_be); buf2.seek(0)
     png_b64_seagull_be = base64.b64encode(buf2.getvalue()).decode("ascii")
 
@@ -4518,7 +4496,7 @@ def fx_seagull():
         png_b64_seagull_be=png_b64_seagull_be,
         # 入力
         S0=S0, Kp=Kp, Kc1=Kc1, Kc2=Kc2, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
-        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
+        smin=smin, smax=smax, points=points, months=months,
         # 出力
         prem_put=prem_put, prem_call1=prem_call1, prem_call2=prem_call2,
         premium_net=premium_net, premium_net_jpy=premium_net_jpy,
@@ -4572,288 +4550,74 @@ def fx_download_csv_seagull():
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
     return send_file(data, mimetype="text/csv", as_attachment=True, download_name="seagull_pnl.csv")
 
+# ================= Risk Reversal (Long Call + Short Put) ======================
 
-# ================= Seagull (Importer) =================
-#  -Spot + Long Call(Kc) + Short Put(Kp1) + Long Put(Kp2)
-#  想定：Kp2 < Kp1 < S0 < Kc
-
-def payoff_components_seagull_importer(S_T, S0, Kc, Kp1, Kp2, prem_call, prem_put_sp, prem_put_lp, qty):
+def payoff_components_risk_reversal(S_T, Kc, Kp, prem_call, prem_put, qty):
     """
-    Seagull（輸入向け）の各損益（JPY）
-      Spot(short USD)   = -(S_T - S0) * qty
-      Long Call(Kc)     = (-prem_call     + max(S_T - Kc, 0)) * qty
-      Short Put(Kp1)    = ( prem_put_sp   - max(Kp1 - S_T, 0)) * qty
-      Long  Put(Kp2)    = (-prem_put_lp   + max(Kp2 - S_T, 0)) * qty
-      Combo             = Spot + LongCall + ShortPut(Kp1) + LongPut(Kp2)
-    """
-    spot_pl       = -(S_T - S0) * qty
-    long_call_pl  = (-prem_call   + np.maximum(S_T - Kc,  0.0)) * qty
-    short_put_pl  = ( prem_put_sp - np.maximum(Kp1 - S_T, 0.0)) * qty
-    long_put2_pl  = (-prem_put_lp + np.maximum(Kp2 - S_T, 0.0)) * qty
-    combo_pl      = spot_pl + long_call_pl + short_put_pl + long_put2_pl
-    return {
-        "spot":      spot_pl,
-        "long_call": long_call_pl,
-        "short_put": short_put_pl,
-        "long_put2": long_put2_pl,
-        "combo":     combo_pl,
-    }
-
-
-def build_grid_and_rows_seagull_importer(S0, Kc, Kp1, Kp2, prem_call, prem_put_sp, prem_put_lp,
-                                         qty, smin, smax, points, step: float = 0.25):
-    if smin > smax:
-        smin, smax = smax, smin
-    S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl  = payoff_components_seagull_importer(S_T, S0, Kc, Kp1, Kp2, prem_call, prem_put_sp, prem_put_lp, qty)
-    rows = [{
-        "st":        float(S_T[i]),
-        "spot":      float(pl["spot"][i]),
-        "long_call": float(pl["long_call"][i]),
-        "short_put": float(pl["short_put"][i]),
-        "long_put2": float(pl["long_put2"][i]),
-        "combo":     float(pl["combo"][i]),
-    } for i in range(len(S_T))]
-    return S_T, pl, rows
-
-
-def draw_chart_seagull_importer(S_T, pl, S0, Kc, Kp1, Kp2, be_vals):
-    fig = plt.figure(figsize=(7.8, 4.8), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, pl["spot"],      label="Spot (USD Short)", color="black", linewidth=2)
-    ax.plot(S_T, pl["long_call"], label="Long Call (Kc)",   color="tab:blue")
-    ax.plot(S_T, pl["short_put"], label="Short Put (Kp1)",  color="tab:red")
-    ax.plot(S_T, pl["long_put2"], label="Long Put  (Kp2)",  color="tab:orange")
-    ax.plot(S_T, pl["combo"],     label="Combo (Importer Seagull)", color="tab:green", linewidth=2)
-
-    _set_ylim_tight(ax, [pl["spot"], pl["long_call"], pl["short_put"], pl["long_put2"], pl["combo"]])
-    ax.axhline(0, linewidth=1)
-
-    y_top = ax.get_ylim()[1]
-    for x, lab, style in [(S0,"S0","--"), (Kp2,"Kp2",":"), (Kp1,"Kp1",":"), (Kc,"Kc",":")]:
-        ax.axvline(x, linestyle=style, linewidth=1)
-        ax.text(x, y_top, f"{lab}={x:.1f}", va="top", ha="left", fontsize=9)
-
-    for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.2, color="tab:purple")
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", va="top", ha="left", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Seagull (Importer): -Spot + Long Call + Short Put(Kp1) + Long Put(Kp2)")
-    _format_y_as_m(ax)
-    ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
-    return fig
-
-
-def draw_seagull_importer_breakeven(S_T, combo_pl, be_vals):
-    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, combo_pl, linewidth=2, color="tab:green", label="Importer Seagull Combo")
-    _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
-
-    y_top = ax.get_ylim()[1]
-    for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.5, color="tab:purple")
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", ha="left", va="top", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Seagull (Importer): Break-even Focus")
-    _format_y_as_m(ax)
-    ax.legend(); ax.grid(True, linewidth=0.3); fig.tight_layout()
-    return fig
-
-
-@app.route("/fx/seagull-importer", methods=["GET", "POST"])
-def fx_seagull_importer():
-    """
-    Seagull（輸入向け）: -Spot + Long Call(Kc) + Short Put(Kp1) + Long Put(Kp2)
-    PremiumはGK式（USD/JPY）
-    """
-    defaults = dict(
-        S0=150.0,
-        Kp2=146.0,   # Long Put（遠い方）
-        Kp1=148.0,   # Short Put（近い方）
-        Kc=155.0,    # Long Call
-        vol=10.0, r_dom=1.6, r_for=4.2,
-        qty=1_000_000,
-        months=1.0,
-        smin=140.0, smax=162.0, points=353
-    )
-
-    if request.method == "POST":
-        def fget(name, cast=float, default=None):
-            val = request.form.get(name, "")
-            try: return cast(val)
-            except Exception: return default if default is not None else defaults[name]
-        S0   = fget("S0", float, defaults["S0"])
-        Kp2  = fget("Kp2", float, defaults["Kp2"])
-        Kp1  = fget("Kp1", float, defaults["Kp1"])
-        Kc   = fget("Kc",  float, defaults["Kc"])
-        vol  = fget("vol", float, defaults["vol"])
-        r_dom= fget("r_dom", float, defaults["r_dom"])
-        r_for= fget("r_for", float, defaults["r_for"])
-        qty  = fget("qty", float, defaults["qty"])
-        months=fget("months", float, defaults["months"])
-        smin = fget("smin", float, defaults["smin"])
-        smax = fget("smax", float, defaults["smax"])
-        points = int(fget("points", float, defaults["points"]))
-    else:
-        S0=defaults["S0"]; Kp2=defaults["Kp2"]; Kp1=defaults["Kp1"]; Kc=defaults["Kc"]
-        vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        qty=defaults["qty"]; months=defaults["months"]
-        smin=defaults["smin"]; smax=defaults["smax"]; points=defaults["points"]
-
-    points = clamp_points(points)
-
-    # GKプレミアム（USD建て）
-    T = max(months, 0.0001) / 12.0
-    sigma = max(vol, 0.0) / 100.0
-    prem_call   = garman_kohlhagen_call(S0, Kc,  r_dom/100.0, r_for/100.0, sigma, T)  # Long Call 支払
-    prem_put_sp = garman_kohlhagen_put (S0, Kp1, r_dom/100.0, r_for/100.0, sigma, T)  # Short Put 受取
-    prem_put_lp = garman_kohlhagen_put (S0, Kp2, r_dom/100.0, r_for/100.0, sigma, T)  # Long  Put 支払
-
-    # 円換算
-    prem_call_jpy   = prem_call   * qty
-    prem_put_sp_jpy = prem_put_sp * qty
-    prem_put_lp_jpy = prem_put_lp * qty
-    premium_net     = prem_put_sp - prem_call - prem_put_lp
-    premium_net_jpy = premium_net * qty
-
-    # グリッド
-    S_T, pl, rows = build_grid_and_rows_seagull_importer(S0, Kc, Kp1, Kp2, prem_call, prem_put_sp, prem_put_lp,
-                                                         qty, smin, smax, points)
-
-    # BE
-    be_vals = _find_breakevens_from_grid(S_T, pl["combo"])
-    be_low  = be_vals[0] if len(be_vals) > 0 else None
-    be_high = be_vals[1] if len(be_vals) > 1 else None
-
-    # グラフ
-    fig = draw_chart_seagull_importer(S_T, pl, S0, Kc, Kp1, Kp2, be_vals)
-    b1 = io.BytesIO(); fig.savefig(b1, format="png"); plt.close(fig); b1.seek(0)
-    png_b64 = base64.b64encode(b1.getvalue()).decode("ascii")
-
-    fig_be = draw_seagull_importer_breakeven(S_T, pl["combo"], be_vals)
-    b2 = io.BytesIO(); fig_be.savefig(b2, format="png"); plt.close(fig_be); b2.seek(0)
-    png_b64_be = base64.b64encode(b2.getvalue()).decode("ascii")
-
-    return render_template(
-        "fx_seagull_importer.html",
-        png_b64=png_b64, png_b64_be=png_b64_be,
-        # 入力
-        S0=S0, Kp2=Kp2, Kp1=Kp1, Kc=Kc, vol=vol, r_dom=r_dom, r_for=r_for,
-        qty=qty, months=months, smin=smin, smax=smax, points=points,
-        # 出力
-        prem_call=prem_call, prem_put_sp=prem_put_sp, prem_put_lp=prem_put_lp,
-        prem_call_jpy=prem_call_jpy, prem_put_sp_jpy=prem_put_sp_jpy, prem_put_lp_jpy=prem_put_lp_jpy,
-        premium_net=premium_net, premium_net_jpy=premium_net_jpy,
-        be_low=be_low, be_high=be_high, rows=rows
-    )
-
-
-@app.route("/fx/download_csv_seagull_importer", methods=["POST"])
-def fx_download_csv_seagull_importer():
-    """
-    Seagull（Importer）のCSV出力
-    列: S_T, SpotShort, LongCall, ShortPut(Kp1), LongPut(Kp2), Combo
-    """
-    def fget(name, cast=float, default=None):
-        val = request.form.get(name, "")
-        try: return cast(val)
-        except Exception: return default
-
-    S0   = fget("S0", float, 150.0)
-    Kp2  = fget("Kp2", float, 146.0)
-    Kp1  = fget("Kp1", float, 148.0)
-    Kc   = fget("Kc",  float, 155.0)
-    prem_call   = fget("prem_call",   float, 0.80)
-    prem_put_sp = fget("prem_put_sp", float, 0.60)
-    prem_put_lp = fget("prem_put_lp", float, 0.40)
-    qty   = fget("qty", float, 1_000_000.0)
-    smin  = fget("smin", float, 140.0)
-    smax  = fget("smax", float, 162.0)
-    step  = 0.25
-
-    S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_seagull_importer(S_T, S0, Kc, Kp1, Kp2, prem_call, prem_put_sp, prem_put_lp, qty)
-
-    import csv
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["S_T(USD/JPY)", "SpotShort_PnL(JPY)", "LongCall_PnL(JPY)",
-                "ShortPut_Kp1_PnL(JPY)", "LongPut_Kp2_PnL(JPY)", "Combo_PnL(JPY)"])
-    for i in range(len(S_T)):
-        w.writerow([
-            f"{S_T[i]:.6f}",
-            f"{pl['spot'][i]:.6f}",
-            f"{pl['long_call'][i]:.6f}",
-            f"{pl['short_put'][i]:.6f}",
-            f"{pl['long_put2'][i]:.6f}",
-            f"{pl['combo'][i]:.6f}",
-        ])
-    data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
-    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="seagull_importer_pnl.csv")
-
-
-# ================= Risk Reversal for Importer (Long Call + Short Put with USD Payable) =================
-
-def payoff_components_risk_reversal(S_T, S0, Kc, Kp, prem_call, prem_put, qty):
-    """
-    Risk Reversal（輸入向け: 100万ドルの買掛債務ヘッジ）。
-      - Long Call(Kc)   = (-prem_call + max(S_T - Kc, 0)) * qty
-      - Short Put(Kp)   = ( prem_put  - max(Kp - S_T, 0)) * qty
-      - Spot P/L (USD short) = -(S_T - S0) * qty
-      - Combo = -Spot + Long Call + Short Put
+    Long Call(Kc) と Short Put(Kp) の損益（JPY）。
+      - Long Call P/L  = (-prem_call + max(S_T - Kc, 0)) * qty
+      - Short Put  P/L = ( prem_put  - max(Kp - S_T, 0)) * qty
     """
     long_call_pl = (-prem_call + np.maximum(S_T - Kc, 0.0)) * qty
     short_put_pl = ( prem_put  - np.maximum(Kp - S_T, 0.0)) * qty
-    spot_pl      = -(S_T - S0) * qty  # USDショート（買掛債務）
-    combo_pl     = spot_pl + long_call_pl + short_put_pl
-    return {
-        "long_call": long_call_pl,
-        "short_put": short_put_pl,
-        "spot":      spot_pl,
-        "combo":     combo_pl
-    }
+    combo_pl     = long_call_pl + short_put_pl
+    return {"long_call": long_call_pl, "short_put": short_put_pl, "combo": combo_pl}
 
 
-def build_grid_and_rows_risk_reversal(S0, Kc, Kp, prem_call, prem_put, qty,
+def build_grid_and_rows_risk_reversal(Kc, Kp, prem_call, prem_put, qty,
                                       smin, smax, points, step: float = 0.25):
     """
-    0.25刻みのレートグリッドを作成し、輸入向け RR の各損益を返す。
+    0.25刻みのレートグリッドを作成し、RRの各損益を返す。
+    points は互換のため受け取り、実際の点数は step により決まる。
     """
     if smin > smax:
         smin, smax = smax, smin
     S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_risk_reversal(S_T, S0, Kc, Kp, prem_call, prem_put, qty)
+    pl = payoff_components_risk_reversal(S_T, Kc, Kp, prem_call, prem_put, qty)
     rows = [{
-        "st":        float(S_T[i]),
+        "st": float(S_T[i]),
         "long_call": float(pl["long_call"][i]),
         "short_put": float(pl["short_put"][i]),
-        "spot":      float(pl["spot"][i]),
-        "combo":     float(pl["combo"][i]),
+        "combo": float(pl["combo"][i]),
     } for i in range(len(S_T))]
     return S_T, pl, rows
+
+
+# （すでに他戦略で定義済みなら再定義不要）
+def _find_breakevens_from_grid(S_T, y):
+    """
+    グリッド上のゼロ交差（損益分岐点）を線形補間で抽出。最大2点返す。
+    """
+    bes = []
+    for i in range(1, len(S_T)):
+        y0, y1 = y[i-1], y[i]
+        if y0 == 0:
+            bes.append(S_T[i-1])
+        if (y0 < 0 and y1 > 0) or (y0 > 0 and y1 < 0):
+            x0, x1 = S_T[i-1], S_T[i]
+            t = abs(y0) / (abs(y0) + abs(y1))
+            bes.append(x0 + (x1 - x0) * t)
+    uniq = []
+    for x in bes:
+        if not any(abs(x - u) < 1e-6 for u in uniq):
+            uniq.append(x)
+    return uniq[:2]
 
 
 def draw_chart_risk_reversal(S_T, pl, S0, Kc, Kp, be_vals):
     """
-    輸入向け Risk Reversal の損益グラフ。
-    4本：Spot（黒, USDショート）/ Long Call（青）/ Short Put（赤）/ Combo（緑）
+    Risk Reversal の損益グラフ。Y軸はM表記。
+    3本：Long Call（青）/ Short Put（赤）/ Combo（緑）
+    縦線：S0, Kp, Kc, BE(±)
     """
     fig = plt.figure(figsize=(7.5, 4.8), dpi=120)
     ax = fig.add_subplot(111)
 
-    ax.plot(S_T, pl["spot"],      label="Spot USD Short P/L", color="black", linewidth=2)
     ax.plot(S_T, pl["long_call"], label="Long Call(Kc) P/L",  color="blue")
     ax.plot(S_T, pl["short_put"], label="Short Put(Kp) P/L",  color="red")
-    ax.plot(S_T, pl["combo"],     label="Combo (Importer Hedge)", color="green", linewidth=2)
+    ax.plot(S_T, pl["combo"],     label="Combo (Risk Reversal)", color="green", linewidth=2)
 
-    _set_ylim_tight(ax, [pl["spot"], pl["long_call"], pl["short_put"], pl["combo"]])
+    _set_ylim_tight(ax, [pl["long_call"], pl["short_put"], pl["combo"]])
     ax.axhline(0, linewidth=1)
 
     y_top = ax.get_ylim()[1]
@@ -4863,11 +4627,11 @@ def draw_chart_risk_reversal(S_T, pl, S0, Kc, Kp, be_vals):
 
     for i, be in enumerate(be_vals):
         ax.axvline(be, linestyle="--", linewidth=1.2)
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", va="top", ha="left", fontsize=9)
+        ax.text(be, y_top, f"BE{ i+1 }={be:.2f}", va="top", ha="left", fontsize=9)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Risk Reversal (Importer Hedge: -Spot + Long Call + Short Put)")
+    ax.set_title("Risk Reversal: Long Call(Kc) + Short Put(Kp)")
     _format_y_as_m(ax)
     ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
@@ -4875,39 +4639,37 @@ def draw_chart_risk_reversal(S_T, pl, S0, Kc, Kp, be_vals):
 
 def draw_rr_breakeven(S_T, combo_pl, be_vals):
     """
-    輸入向け Risk Reversal の合成P/Lと損益分岐点フォーカス。
-    （借入利息ラインなし）
+    Risk Reversal の合成P/Lと損益分岐点フォーカス表示
     """
     fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
     ax = fig.add_subplot(111)
 
-    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Importer Combo P/L")
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="RR Combo P/L")
     _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
 
     y_top = ax.get_ylim()[1]
     for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.5, color="tab:orange")
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", va="top", ha="left", fontsize=9)
+        ax.axvline(be, linestyle="--", linewidth=1.5, label=f"BE{i+1}")
+        ax.text(be, y_top, f"BE{ i+1 }={be:.2f}", va="top", ha="left", fontsize=9)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Importer Risk Reversal: Break-even Focus")
+    ax.set_title("Risk Reversal: Break-even Focus")
     _format_y_as_m(ax)
     ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
 
 
-# 画面ルート（Risk Reversal Importer）
+# 画面ルート（Risk Reversal）
 @app.route("/fx/risk-reversal", methods=["GET", "POST"])
 def fx_risk_reversal():
     """
-    Risk Reversal（Importer: -Spot + Long Call Kc + Short Put Kp）の損益を表示。
+    Risk Reversal（Long Call Kc + Short Put Kp）の損益を表示。
     Premium は GK式（JPY/USD）。
     """
     defaults = dict(
-        S0=150.0, Kc=152.0, Kp=148.0,
+        S0=150.0, Kc=152.0, Kp=148.0,     # Kp < S0 < Kc を推奨
         vol=10.0, r_dom=1.6, r_for=4.2,
-        r_borrow=4.2,             # 借入利息（年率, %）
         qty=1_000_000,
         smin=140.0, smax=162.0, points=353,
         months=1.0
@@ -4924,7 +4686,6 @@ def fx_risk_reversal():
         vol  = fget("vol", float, defaults["vol"])
         r_dom= fget("r_dom", float, defaults["r_dom"])
         r_for= fget("r_for", float, defaults["r_for"])
-        r_borrow = fget("r_borrow", float, defaults["r_borrow"])
         qty  = fget("qty", float, defaults["qty"])
         smin = fget("smin", float, defaults["smin"])
         smax = fget("smax", float, defaults["smax"])
@@ -4933,7 +4694,6 @@ def fx_risk_reversal():
     else:
         S0=defaults["S0"]; Kc=defaults["Kc"]; Kp=defaults["Kp"]
         vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        r_borrow=defaults["r_borrow"]
         qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
         points=defaults["points"]; months=defaults["months"]
 
@@ -4945,34 +4705,31 @@ def fx_risk_reversal():
     prem_call = garman_kohlhagen_call(S0, Kc, r_dom/100.0, r_for/100.0, sigma, T)  # 支払（Long Call）
     prem_put  = garman_kohlhagen_put (S0, Kp, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Put）
 
-    # ネット・プレミアム
+    # ネット・プレミアム（受取 − 支払）
     premium_net      = prem_put - prem_call
     prem_call_jpy    = prem_call * qty
     prem_put_jpy     = prem_put  * qty
     premium_net_jpy  = premium_net * qty
 
     # グリッド
-    S_T, pl, rows = build_grid_and_rows_risk_reversal(S0, Kc, Kp, prem_call, prem_put, qty, smin, smax, points)
+    S_T, pl, rows = build_grid_and_rows_risk_reversal(Kc, Kp, prem_call, prem_put, qty, smin, smax, points)
 
-    # 損益分岐点
+    # 損益分岐点（数値近似）
     be_vals = _find_breakevens_from_grid(S_T, pl["combo"])
     be_low  = be_vals[0] if len(be_vals) > 0 else None
     be_high = be_vals[1] if len(be_vals) > 1 else None
 
-    # レンジ内最大/最小
+    # レンジ内 最大/最小
     idx_min = int(np.argmin(pl["combo"])); idx_max = int(np.argmax(pl["combo"]))
     range_floor, range_floor_st = float(pl["combo"][idx_min]), float(S_T[idx_min])
     range_cap,   range_cap_st   = float(pl["combo"][idx_max]), float(S_T[idx_max])
 
-    # 借入利息ライン
-    borrow_cost_flat = -(S0 * qty * (r_borrow/100.0) * T)
-
-    # グラフ①
+    # グラフ①：全体P/L
     fig = draw_chart_risk_reversal(S_T, pl, S0, Kc, Kp, be_vals)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    # グラフ②
+    # グラフ②：損益分岐点フォーカス
     fig_be = draw_rr_breakeven(S_T, pl["combo"], be_vals)
     buf2 = io.BytesIO(); fig_be.savefig(buf2, format="png"); plt.close(fig_be); buf2.seek(0)
     png_b64_rr_be = base64.b64encode(buf2.getvalue()).decode("ascii")
@@ -4982,8 +4739,8 @@ def fx_risk_reversal():
         png_b64=png_b64,
         png_b64_rr_be=png_b64_rr_be,
         # 入力
-        S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, r_borrow=r_borrow,
-        qty=qty, smin=smin, smax=smax, points=points, months=months,
+        S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months,
         # 出力
         prem_call=prem_call, prem_put=prem_put,
         prem_call_jpy=prem_call_jpy, prem_put_jpy=prem_put_jpy,
@@ -4991,24 +4748,22 @@ def fx_risk_reversal():
         be_low=be_low, be_high=be_high,
         range_floor=range_floor, range_floor_st=range_floor_st,
         range_cap=range_cap, range_cap_st=range_cap_st,
-        rows=rows,
-        borrow_cost_flat=borrow_cost_flat
+        rows=rows
     )
 
 
-# CSV（Risk Reversal Importer）
+# CSV（Risk Reversal）
 @app.route("/fx/download_csv_risk_reversal", methods=["POST"])
 def fx_download_csv_risk_reversal():
     """
-    Risk Reversal（Importer）のCSV出力。
-    列: S_T, LongCall_PnL, ShortPut_PnL, SpotShort_PnL, Combo_PnL
+    Risk Reversal のCSV出力。
+    列: S_T, LongCall_PnL, ShortPut_PnL, Combo_PnL
     """
     def fget(name, cast=float, default=None):
         val = request.form.get(name, "")
         try: return cast(val)
         except Exception: return default
 
-    S0        = fget("S0", float, 150.0)
     Kc        = fget("Kc", float, 152.0)
     Kp        = fget("Kp", float, 148.0)
     prem_call = fget("prem_call", float, 0.80)
@@ -5019,49 +4774,38 @@ def fx_download_csv_risk_reversal():
     points    = fget("points", float, 353)
     step      = 0.25
 
-    S_T, pl, _ = build_grid_and_rows_risk_reversal(S0, Kc, Kp, prem_call, prem_put, qty, smin, smax, points, step=step)
+    S_T, pl, _ = build_grid_and_rows_risk_reversal(Kc, Kp, prem_call, prem_put, qty, smin, smax, points, step=step)
 
     import csv, io
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["S_T(USD/JPY)", "LongCall_PnL(JPY)", "ShortPut_PnL(JPY)", "SpotShort_PnL(JPY)", "Combo_PnL(JPY)"])
+    w.writerow(["S_T(USD/JPY)", "LongCall_PnL(JPY)", "ShortPut_PnL(JPY)", "Combo_PnL(JPY)"])
     for i in range(len(S_T)):
         w.writerow([
             f"{S_T[i]:.6f}",
             f"{pl['long_call'][i]:.6f}",
             f"{pl['short_put'][i]:.6f}",
-            f"{pl['spot'][i]:.6f}",
             f"{pl['combo'][i]:.6f}",
         ])
 
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
-    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="risk_reversal_importer_pnl.csv")
-
+    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="risk_reversal_pnl.csv")
 
 # ================= Short Risk Reversal (Short Call + Long Put) =================
 
-def payoff_components_risk_reversal_short(S_T, S0, Kc, Kp, prem_call, prem_put, qty):
+def payoff_components_risk_reversal_short(S_T, Kc, Kp, prem_call, prem_put, qty):
     """
-    Short Call(Kc) と Long Put(Kp) に加え、Spot(現物)を含む各損益（JPY）を返す。
+    Short Call(Kc) と Long Put(Kp) の損益（JPY）。
       - Short Call P/L = ( prem_call - max(S_T - Kc, 0)) * qty
       - Long  Put  P/L = (-prem_put  + max(Kp - S_T, 0)) * qty
-      - Spot P/L      = (S_T - S0) * qty
-      - Combo(with Spot) = Spot + Long Put - Short Call
     """
     short_call_pl = ( prem_call - np.maximum(S_T - Kc, 0.0)) * qty
     long_put_pl   = (-prem_put  + np.maximum(Kp - S_T, 0.0)) * qty
-    spot_pl       = (S_T - S0) * qty
-    combo_with_spot = spot_pl + long_put_pl - short_call_pl
-    return {
-        "short_call": short_call_pl,
-        "long_put":   long_put_pl,
-        "spot":       spot_pl,
-        "combo":      combo_with_spot,   # 以降の互換のためキー名は "combo" を継続（中身は現物込み）
-        "combo_with_spot": combo_with_spot
-    }
+    combo_pl      = short_call_pl + long_put_pl
+    return {"short_call": short_call_pl, "long_put": long_put_pl, "combo": combo_pl}
 
 
-def build_grid_and_rows_risk_reversal_short(S0, Kc, Kp, prem_call, prem_put, qty,
+def build_grid_and_rows_risk_reversal_short(Kc, Kp, prem_call, prem_put, qty,
                                             smin, smax, points, step: float = 0.25):
     """
     0.25刻みのレートグリッドを作成し、Short RR の各損益を返す。
@@ -5070,13 +4814,12 @@ def build_grid_and_rows_risk_reversal_short(S0, Kc, Kp, prem_call, prem_put, qty
     if smin > smax:
         smin, smax = smax, smin
     S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_risk_reversal_short(S_T, S0, Kc, Kp, prem_call, prem_put, qty)
+    pl = payoff_components_risk_reversal_short(S_T, Kc, Kp, prem_call, prem_put, qty)
     rows = [{
-        "st":         float(S_T[i]),
+        "st": float(S_T[i]),
         "short_call": float(pl["short_call"][i]),
         "long_put":   float(pl["long_put"][i]),
-        "spot":       float(pl["spot"][i]),
-        "combo":      float(pl["combo"][i]),  # 現物込み
+        "combo":      float(pl["combo"][i]),
     } for i in range(len(S_T))]
     return S_T, pl, rows
 
@@ -5084,18 +4827,17 @@ def build_grid_and_rows_risk_reversal_short(S0, Kc, Kp, prem_call, prem_put, qty
 def draw_chart_risk_reversal_short(S_T, pl, S0, Kc, Kp, be_vals):
     """
     Short Risk Reversal の損益グラフ。Y軸はM表記。
-    4本：Spot（黒）/ Short Call（青）/ Long Put（赤）/ Combo=Spot+Put-Call（緑）
+    3本：Short Call（青）/ Long Put（赤）/ Combo（緑）
     縦線：S0, Kp, Kc, BE(±)
     """
     fig = plt.figure(figsize=(7.5, 4.8), dpi=120)
     ax = fig.add_subplot(111)
 
-    ax.plot(S_T, pl["spot"],       label="Spot USD P/L (vs today)", color="black", linewidth=2)
-    ax.plot(S_T, pl["short_call"], label="Short Call(Kc) P/L",      color="blue")
-    ax.plot(S_T, pl["long_put"],   label="Long  Put(Kp) P/L",       color="red")
-    ax.plot(S_T, pl["combo"],      label="Combo (Spot + Put - Call)", color="green", linewidth=2)
+    ax.plot(S_T, pl["short_call"], label="Short Call(Kc) P/L", color="blue")
+    ax.plot(S_T, pl["long_put"],   label="Long  Put(Kp) P/L",  color="red")
+    ax.plot(S_T, pl["combo"],      label="Combo (Short Risk Reversal)", color="green", linewidth=2)
 
-    _set_ylim_tight(ax, [pl["spot"], pl["short_call"], pl["long_put"], pl["combo"]])
+    _set_ylim_tight(ax, [pl["short_call"], pl["long_put"], pl["combo"]])
     ax.axhline(0, linewidth=1)
 
     y_top = ax.get_ylim()[1]
@@ -5109,30 +4851,25 @@ def draw_chart_risk_reversal_short(S_T, pl, S0, Kc, Kp, be_vals):
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Short Risk Reversal: Spot + Long Put(Kp) + Short Call(Kc)")
+    ax.set_title("Short Risk Reversal: Short Call(Kc) + Long Put(Kp)")
     _format_y_as_m(ax)
     ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
 
 
-def draw_rr_short_breakeven(S_T, combo_pl, be_vals, borrow_cost_flat=None):
+def draw_rr_short_breakeven(S_T, combo_pl, be_vals):
     """
-    Short Risk Reversal の合成P/L(現物込み) と損益分岐点フォーカス表示。
-    借入利息ライン（フラット）も表示（指定時）。
+    Short Risk Reversal の合成P/Lと損益分岐点フォーカス表示
     """
     fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
     ax = fig.add_subplot(111)
 
-    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Short RR Combo (with Spot)")
+    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Short RR Combo P/L")
     _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
-
-    # 借入利息ライン（一定額）
-    if borrow_cost_flat is not None:
-        ax.axhline(borrow_cost_flat, linestyle="--", linewidth=1.5, color="tab:blue", label="Borrow Cost (flat)")
 
     y_top = ax.get_ylim()[1]
     for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.5, color="tab:orange")
+        ax.axvline(be, linestyle="--", linewidth=1.5, label=f"BE{i+1}")
         ax.text(be, y_top, f"BE{ i+1 }={be:.2f}", va="top", ha="left", fontsize=9)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
@@ -5153,7 +4890,6 @@ def fx_risk_reversal_short():
     defaults = dict(
         S0=150.0, Kc=152.0, Kp=148.0,     # Kp < S0 < Kc を推奨
         vol=10.0, r_dom=1.6, r_for=4.2,
-        r_borrow=4.2,                     # 追加：借入利息（年率, %）
         qty=1_000_000,
         smin=140.0, smax=162.0, points=353,
         months=1.0
@@ -5170,7 +4906,6 @@ def fx_risk_reversal_short():
         vol  = fget("vol", float, defaults["vol"])
         r_dom= fget("r_dom", float, defaults["r_dom"])
         r_for= fget("r_for", float, defaults["r_for"])
-        r_borrow = fget("r_borrow", float, defaults["r_borrow"])  # 追加
         qty  = fget("qty", float, defaults["qty"])
         smin = fget("smin", float, defaults["smin"])
         smax = fget("smax", float, defaults["smax"])
@@ -5179,7 +4914,6 @@ def fx_risk_reversal_short():
     else:
         S0=defaults["S0"]; Kc=defaults["Kc"]; Kp=defaults["Kp"]
         vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        r_borrow=defaults["r_borrow"]
         qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
         points=defaults["points"]; months=defaults["months"]
 
@@ -5197,29 +4931,26 @@ def fx_risk_reversal_short():
     prem_put_jpy     = prem_put  * qty
     premium_net_jpy  = premium_net * qty
 
-    # グリッド（※S0を渡す）
-    S_T, pl, rows = build_grid_and_rows_risk_reversal_short(S0, Kc, Kp, prem_call, prem_put, qty, smin, smax, points)
+    # グリッド
+    S_T, pl, rows = build_grid_and_rows_risk_reversal_short(Kc, Kp, prem_call, prem_put, qty, smin, smax, points)
 
-    # 損益分岐点（数値近似）- 現物込みComboで判定
+    # 損益分岐点（数値近似）
     be_vals = _find_breakevens_from_grid(S_T, pl["combo"])
     be_low  = be_vals[0] if len(be_vals) > 0 else None
     be_high = be_vals[1] if len(be_vals) > 1 else None
 
-    # レンジ内 最大/最小（現物込み Combo）
+    # レンジ内 最大/最小
     idx_min = int(np.argmin(pl["combo"])); idx_max = int(np.argmax(pl["combo"]))
     range_floor, range_floor_st = float(pl["combo"][idx_min]), float(S_T[idx_min])
     range_cap,   range_cap_st   = float(pl["combo"][idx_max]), float(S_T[idx_max])
 
-    # 借入利息ライン（フラット）
-    borrow_cost_flat = -(S0 * qty * (r_borrow/100.0) * T)
-
-    # グラフ①：全体P/L（Spot追加、Comboは現物込み）
+    # グラフ①：全体P/L
     fig = draw_chart_risk_reversal_short(S_T, pl, S0, Kc, Kp, be_vals)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    # グラフ②：損益分岐点フォーカス（Combo=現物込み、借入利息ライン追加）
-    fig_be = draw_rr_short_breakeven(S_T, pl["combo"], be_vals, borrow_cost_flat=borrow_cost_flat)
+    # グラフ②：損益分岐点フォーカス
+    fig_be = draw_rr_short_breakeven(S_T, pl["combo"], be_vals)
     buf2 = io.BytesIO(); fig_be.savefig(buf2, format="png"); plt.close(fig_be); buf2.seek(0)
     png_b64_rr_be = base64.b64encode(buf2.getvalue()).decode("ascii")
 
@@ -5228,8 +4959,8 @@ def fx_risk_reversal_short():
         png_b64=png_b64,
         png_b64_rr_be=png_b64_rr_be,
         # 入力
-        S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, r_borrow=r_borrow,
-        qty=qty, smin=smin, smax=smax, points=points, months=months,
+        S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
+        smin=smin, smax=smax, points=points, months=months,
         # 出力
         prem_call=prem_call, prem_put=prem_put,
         prem_call_jpy=prem_call_jpy, prem_put_jpy=prem_put_jpy,
@@ -5237,8 +4968,7 @@ def fx_risk_reversal_short():
         be_low=be_low, be_high=be_high,
         range_floor=range_floor, range_floor_st=range_floor_st,
         range_cap=range_cap, range_cap_st=range_cap_st,
-        rows=rows,
-        borrow_cost_flat=borrow_cost_flat
+        rows=rows
     )
 
 
@@ -5247,14 +4977,13 @@ def fx_risk_reversal_short():
 def fx_download_csv_risk_reversal_short():
     """
     Short Risk Reversal のCSV出力。
-    列: S_T, ShortCall_PnL, LongPut_PnL, Spot_PnL, Combo_PnL(現物込み)
+    列: S_T, ShortCall_PnL, LongPut_PnL, Combo_PnL
     """
     def fget(name, cast=float, default=None):
         val = request.form.get(name, "")
         try: return cast(val)
         except Exception: return default
 
-    S0        = fget("S0", float, 150.0)
     Kc        = fget("Kc", float, 152.0)
     Kp        = fget("Kp", float, 148.0)
     prem_call = fget("prem_call", float, 0.80)
@@ -5265,24 +4994,22 @@ def fx_download_csv_risk_reversal_short():
     points    = fget("points", float, 353)
     step      = 0.25
 
-    S_T, pl, _ = build_grid_and_rows_risk_reversal_short(S0, Kc, Kp, prem_call, prem_put, qty, smin, smax, points, step=step)
+    S_T, pl, _ = build_grid_and_rows_risk_reversal_short(Kc, Kp, prem_call, prem_put, qty, smin, smax, points, step=step)
 
     import csv, io
     buf = io.StringIO()
     w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["S_T(USD/JPY)", "ShortCall_PnL(JPY)", "LongPut_PnL(JPY)", "Spot_PnL(JPY)", "Combo_PnL_withSpot(JPY)"])
+    w.writerow(["S_T(USD/JPY)", "ShortCall_PnL(JPY)", "LongPut_PnL(JPY)", "Combo_PnL(JPY)"])
     for i in range(len(S_T)):
         w.writerow([
             f"{S_T[i]:.6f}",
             f"{pl['short_call'][i]:.6f}",
             f"{pl['long_put'][i]:.6f}",
-            f"{pl['spot'][i]:.6f}",
-            f"{pl['combo'][i]:.6f}",  # 現物込み
+            f"{pl['combo'][i]:.6f}",
         ])
 
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
     return send_file(data, mimetype="text/csv", as_attachment=True, download_name="short_risk_reversal_pnl.csv")
-
 
 # ================= Backspread (Call / Put) =====================================
 
@@ -8871,46 +8598,15 @@ def draw_chart_participating_collar(S_T, pl, S0, Kp, Kc, be_list, part):
     ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
 
-def draw_be_focus_participating(S_T, combo_pl, be_list, finance_cost=None):
-    """
-    合成損益×損益分岐点フォーカス。
-    finance_cost を渡せば、-finance_cost の水平ライン（Borrow Cost）も描画。
-    """
+def draw_be_focus_participating(S_T, combo_pl, be_list):
+    """合成損益×損益分岐点フォーカス。"""
     fig = plt.figure(figsize=(7.2, 4.0), dpi=120); ax = fig.add_subplot(111)
-
-    # 表示範囲を決めるための系列セット
-    ys = [combo_pl]
-    borrow_level = None
-    if finance_cost is not None:
-        borrow_level = -float(finance_cost)
-        ys.append(np.full_like(S_T, borrow_level, dtype=float))
-
     ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Combo P/L")
-    _set_ylim_tight(ax, ys)
-    ax.axhline(0, linewidth=1)
-
-    # 損益分岐点の縦線
+    _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
     y_top = ax.get_ylim()[1]
     for i, be in enumerate(be_list, start=1):
         ax.axvline(be, linestyle="--", linewidth=1.5, label=f"BE{i}")
         ax.text(be, y_top, f"BE{i}={be:.2f}", va="top", ha="left", fontsize=9)
-
-    # 支払利息ライン（-finance_cost）
-    if borrow_level is not None:
-        ymin, ymax = ax.get_ylim()
-        if ymin <= borrow_level <= ymax:
-            ax.axhline(borrow_level, linestyle="--", linewidth=1.2, color="gray",
-                       label="Borrow Cost (flat)")
-        else:
-            # レンジ外なら注記だけ出す
-            pos = "below" if borrow_level < ymin else "above"
-            ax.annotate(f"Borrow ≈ {borrow_level/1e6:.1f}M ({pos})",
-                        xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
-                        xytext=(6, -14 if pos=='below' else 6),
-                        textcoords="offset points",
-                        va="top" if pos=='below' else "bottom",
-                        ha="left", fontsize=9, color="gray")
-
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
     ax.set_title("Participating Collar: Break-even Focus")
@@ -8932,8 +8628,7 @@ def fx_participating_collar():
         qty=1_000_000,
         part=0.50,                 # ← コール売りノーション比（0〜1）
         smin=130.0, smax=160.0, points=251,
-        months=1.0,
-        borrow_rate=4.2,           # ← 追加：借入年率（％）
+        months=1.0
     )
 
     if request.method == "POST":
@@ -8951,15 +8646,11 @@ def fx_participating_collar():
             part = float(request.form.get("part_pct", "50.0")) / 100.0
         else:
             part = fget("part", float, defaults["part"])
-        # ← 追加：借入年率
-        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
     else:
         S0=defaults["S0"]; Kp=defaults["Kp"]; Kc=defaults["Kc"]
         vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
         qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
         points=defaults["points"]; months=defaults["months"]; part=defaults["part"]
-        # ← 追加：借入年率
-        borrow_rate=defaults["borrow_rate"]
 
     # 整理
     points = clamp_points(points)
@@ -8991,17 +8682,13 @@ def fx_participating_collar():
     range_floor, range_floor_st = float(pl["combo"][idx_min]), float(S_T[idx_min])
     range_cap,   range_cap_st   = float(pl["combo"][idx_max]), float(S_T[idx_max])
 
-    # 支払利息（JPY）…BEフォーカスに水平ラインで表示
-    notional_jpy = S0 * qty
-    finance_jpy = notional_jpy * (borrow_rate / 100.0) * (months / 12.0)
-
     # 図①：総合
     fig = draw_chart_participating_collar(S_T, pl, S0, Kp, Kc, be_list, part)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    # 図②：損益分岐点フォーカス（Borrow Cost ライン付き）
-    fig2 = draw_be_focus_participating(S_T, pl["combo"], be_list, finance_cost=finance_jpy)
+    # 図②：損益分岐点フォーカス
+    fig2 = draw_be_focus_participating(S_T, pl["combo"], be_list)
     buf2 = io.BytesIO(); fig2.savefig(buf2, format="png"); plt.close(fig2); buf2.seek(0)
     png_b64_be = base64.b64encode(buf2.getvalue()).decode("ascii")
 
@@ -9011,7 +8698,6 @@ def fx_participating_collar():
         # 入力
         S0=S0, Kp=Kp, Kc=Kc, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
         smin=smin, smax=smax, points=points, months=months, part=part,
-        borrow_rate=borrow_rate,  # （必要ならテンプレで表示）
         # 出力（算出値）
         prem_put=prem_put, prem_call=prem_call,
         prem_put_jpy=prem_put_jpy, prem_call_jpy=prem_call_jpy,
@@ -9070,220 +8756,6 @@ def fx_download_csv_participating_collar():
         data, mimetype="text/csv", as_attachment=True,
         download_name="participating_collar_pnl.csv",
     )
-
-# ================= Participating Collar (Importer) =================
-
-def payoff_components_participating_collar_importer(S_T, S0, Kc, Kp, prem_call, prem_put, qty, r):
-    """
-    Participating Collar（輸入向け）
-      Combo = -Spot + Long Call + r * Short Put
-    """
-    long_call_pl = (-prem_call + np.maximum(S_T - Kc, 0.0)) * qty
-    short_put_pl = (prem_put - np.maximum(Kp - S_T, 0.0)) * qty
-    spot_pl      = -(S_T - S0) * qty  # USDショート
-    combo_pl     = spot_pl + long_call_pl + r * short_put_pl
-    return {
-        "long_call": long_call_pl,
-        "short_put": r * short_put_pl,
-        "spot":      spot_pl,
-        "combo":     combo_pl
-    }
-
-
-def build_grid_and_rows_pc_importer(S0, Kc, Kp, prem_call, prem_put, qty, r,
-                                    smin, smax, points, step: float = 0.25):
-    if smin > smax:
-        smin, smax = smax, smin
-    S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_participating_collar_importer(S_T, S0, Kc, Kp, prem_call, prem_put, qty, r)
-    rows = [{
-        "st":        float(S_T[i]),
-        "long_call": float(pl["long_call"][i]),
-        "short_put": float(pl["short_put"][i]),
-        "spot":      float(pl["spot"][i]),
-        "combo":     float(pl["combo"][i]),
-    } for i in range(len(S_T))]
-    return S_T, pl, rows
-
-
-def draw_chart_pc_importer(S_T, pl, S0, Kc, Kp, be_vals, r):
-    fig = plt.figure(figsize=(7.5, 4.8), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, pl["spot"],      label="Spot (USD Short)", color="black", linewidth=2)
-    ax.plot(S_T, pl["long_call"], label="Long Call(Kc)",    color="blue")
-    ax.plot(S_T, pl["short_put"], label=f"Short Put(Kp) × {r:.2f}", color="red")
-    ax.plot(S_T, pl["combo"],     label="Combo (Importer PC)", color="green", linewidth=2)
-
-    _set_ylim_tight(ax, [pl["spot"], pl["long_call"], pl["short_put"], pl["combo"]])
-    ax.axhline(0, linewidth=1)
-
-    y_top = ax.get_ylim()[1]
-    for x, lab, style in [(S0,"S0","--"), (Kp,"Kp",":"), (Kc,"Kc",":")]:
-        ax.axvline(x, linestyle=style, linewidth=1)
-        ax.text(x, y_top, f"{lab}={x:.1f}", va="top", ha="left", fontsize=9)
-
-    for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.2, color="orange")
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", va="top", ha="left", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title(f"Participating Collar Importer (r={r:.2f})")
-    _format_y_as_m(ax)
-    ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
-    return fig
-
-
-# --- 追加：損益分岐点フォーカス用グラフ ---
-def draw_pc_importer_breakeven(S_T, combo_pl, be_vals, r):
-    """
-    Participating Collar Importer 損益分岐点フォーカス（借入ラインなし）
-    """
-    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, combo_pl, linewidth=2, color="green", label=f"Combo (r={r:.2f})")
-    _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
-
-    y_top = ax.get_ylim()[1]
-    for i, be in enumerate(be_vals):
-        ax.axvline(be, linestyle="--", linewidth=1.5, color="orange")
-        ax.text(be, y_top, f"BE{i+1}={be:.2f}", ha="left", va="top", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Participating Collar Importer: Break-even Focus")
-    _format_y_as_m(ax)
-    ax.legend(); ax.grid(True, linewidth=0.3); fig.tight_layout()
-    return fig
-
-
-@app.route("/fx/pc-importer", methods=["GET", "POST"])
-def fx_pc_importer():
-    """
-    Participating Collar（Importer: -Spot + Long Call + r*Short Put）
-    """
-    defaults = dict(
-        S0=150.0, Kc=152.0, Kp=148.0,
-        vol=10.0, r_dom=1.6, r_for=4.2,
-        qty=1_000_000, r=0.5,    # 参加率デフォルト50%
-        smin=140.0, smax=162.0, points=353,
-        months=1.0
-    )
-
-    if request.method == "POST":
-        def fget(name, cast=float, default=None):
-            val = request.form.get(name, "")
-            try: return cast(val)
-            except Exception: return default if default is not None else defaults[name]
-        S0   = fget("S0", float, defaults["S0"])
-        Kc   = fget("Kc", float, defaults["Kc"])
-        Kp   = fget("Kp", float, defaults["Kp"])
-        vol  = fget("vol", float, defaults["vol"])
-        r_dom= fget("r_dom", float, defaults["r_dom"])
-        r_for= fget("r_for", float, defaults["r_for"])
-        qty  = fget("qty", float, defaults["qty"])
-        r    = fget("r", float, defaults["r"])
-        smin = fget("smin", float, defaults["smin"])
-        smax = fget("smax", float, defaults["smax"])
-        points = int(fget("points", float, defaults["points"]))
-        months = fget("months", float, defaults["months"])
-    else:
-        S0=defaults["S0"]; Kc=defaults["Kc"]; Kp=defaults["Kp"]
-        vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        qty=defaults["qty"]; r=defaults["r"]
-        smin=defaults["smin"]; smax=defaults["smax"]
-        points=defaults["points"]; months=defaults["months"]
-
-    points = clamp_points(points)
-
-    # GK式プレミアム
-    T = max(months, 0.0001) / 12.0
-    sigma = max(vol, 0.0) / 100.0
-    prem_call = garman_kohlhagen_call(S0, Kc, r_dom/100.0, r_for/100.0, sigma, T)
-    prem_put  = garman_kohlhagen_put (S0, Kp, r_dom/100.0, r_for/100.0, sigma, T)
-
-    # JPY換算
-    prem_call_jpy = prem_call * qty
-    prem_put_jpy  = prem_put  * qty
-
-    # グリッド
-    S_T, pl, rows = build_grid_and_rows_pc_importer(S0, Kc, Kp, prem_call, prem_put, qty, r, smin, smax, points)
-
-    # 損益分岐点
-    be_vals = _find_breakevens_from_grid(S_T, pl["combo"])
-    be_low  = be_vals[0] if len(be_vals) > 0 else None
-    be_high = be_vals[1] if len(be_vals) > 1 else None
-
-    # グラフ①：全体P/L
-    fig = draw_chart_pc_importer(S_T, pl, S0, Kc, Kp, be_vals, r)
-    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
-    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-    # グラフ②：損益分岐点フォーカス
-    fig_be = draw_pc_importer_breakeven(S_T, pl["combo"], be_vals, r)
-    buf2 = io.BytesIO(); fig_be.savefig(buf2, format="png"); plt.close(fig_be); buf2.seek(0)
-    png_b64_be = base64.b64encode(buf2.getvalue()).decode("ascii")
-
-    return render_template(
-        "fx_pc_importer.html",
-        png_b64=png_b64,
-        png_b64_be=png_b64_be,
-        # 入力
-        S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
-        r=r, smin=smin, smax=smax, points=points, months=months,
-        # 出力
-        prem_call=prem_call, prem_put=prem_put,
-        prem_call_jpy=prem_call_jpy, prem_put_jpy=prem_put_jpy,
-        be_low=be_low, be_high=be_high,
-        rows=rows
-    )
-
-
-# === 追加：CSVダウンロード用エンドポイント（HTMLの url_for と一致） ===
-@app.route("/fx/download_csv_pc_importer", methods=["POST"])
-def fx_download_csv_pc_importer():
-    """
-    Participating Collar（Importer）のCSV出力。
-    列: S_T, LongCall_PnL, ShortPut_r_PnL, SpotShort_PnL, Combo_PnL
-    """
-    def fget(name, cast=float, default=None):
-        val = request.form.get(name, "")
-        try:
-            return cast(val)
-        except Exception:
-            return default
-
-    S0        = fget("S0", float, 150.0)
-    Kc        = fget("Kc", float, 152.0)
-    Kp        = fget("Kp", float, 148.0)
-    prem_call = fget("prem_call", float, 0.80)
-    prem_put  = fget("prem_put",  float, 0.80)
-    qty       = fget("qty", float, 1_000_000.0)
-    r         = fget("r",   float, 0.5)
-    smin      = fget("smin", float, 140.0)
-    smax      = fget("smax", float, 162.0)
-    step      = 0.25
-
-    S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_participating_collar_importer(S_T, S0, Kc, Kp, prem_call, prem_put, qty, r)
-
-    import csv
-    buf = io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["S_T(USD/JPY)", "LongCall_PnL(JPY)", "ShortPut_r_PnL(JPY)", "SpotShort_PnL(JPY)", "Combo_PnL(JPY)"])
-    for i in range(len(S_T)):
-        w.writerow([
-            f"{S_T[i]:.6f}",
-            f"{pl['long_call'][i]:.6f}",
-            f"{pl['short_put'][i]:.6f}",
-            f"{pl['spot'][i]:.6f}",
-            f"{pl['combo'][i]:.6f}",
-        ])
-
-    data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
-    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="pc_importer_pnl.csv")
 
 # ===================== Conversion / Reversal =====================
 # 依存：np, plt, io, base64, request, render_template, send_file
@@ -11857,598 +11329,165 @@ def fx_download_csv_broken_wing_iron_condor():
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
     return send_file(data, mimetype="text/csv", as_attachment=True, download_name="broken_wing_iron_condor_pnl.csv")
 
-# ================= Put-Spread Collar (Export) ====================
-# 構成：現物USDロング + Long Put@K1 – Short Put@K2 – Short Call@K3
-# 目的：中程度の下落は保護しつつ、費用を抑える（ゼロコスト近傍）
+# ======================= Covered Call / Cash-Secured Put =======================
+# 依存：numpy as np, io, base64, matplotlib.pyplot as plt
+#       from flask import request, render_template, send_file
+# 既存ユーティリティ：_arange_inclusive, _set_ylim_tight, _format_y_as_m, clamp_points
+# 価格関数：garman_kohlhagen_call, garman_kohlhagen_put
 
-def payoff_components_put_spread_collar(S_T, S0, K1, K2, K3,
-                                        prem_put1, prem_put2, prem_call3, qty):
-    """
-    現物USDロング、Long Put(K1)、Short Put(K2)、Short Call(K3) の各損益（JPY）。
-      - Spot       : (S_T - S0) * qty
-      - Long Put   : (-prem_put1 + max(K1 - S_T, 0)) * qty
-      - Short Put  : ( prem_put2 - max(K2 - S_T, 0)) * qty
-      - Short Call : ( prem_call3 - max(S_T - K3, 0)) * qty
-      - Combo      : 上記合計
-    prem_* は JPY/USD（Put買いは支払＝マイナス、Put/Call売りは受取＝プラス の符号で計算）
-    """
-    spot_pl        = (S_T - S0) * qty
-    long_put_pl    = (-prem_put1 + np.maximum(K1 - S_T, 0.0)) * qty
-    short_put_pl   = ( prem_put2 - np.maximum(K2 - S_T, 0.0)) * qty
-    short_call_pl  = ( prem_call3 - np.maximum(S_T - K3, 0.0)) * qty
-    combo_pl       = spot_pl + long_put_pl + short_put_pl + short_call_pl
-    return {
-        "spot": spot_pl,
-        "long_put": long_put_pl,
-        "short_put": short_put_pl,
-        "short_call": short_call_pl,
-        "combo": combo_pl
-    }
-
-
-def build_grid_and_rows_put_spread_collar(S0, K1, K2, K3,
-                                          prem_put1, prem_put2, prem_call3,
-                                          qty, smin, smax, points, step: float = 0.25):
-    """
-    0.25刻みでS_Tグリッド生成し、各損益を行データ化。
-    """
-    if smin > smax:
-        smin, smax = smax, smin
-
-    S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_put_spread_collar(S_T, S0, K1, K2, K3,
-                                             prem_put1, prem_put2, prem_call3, qty)
-
-    rows = [{
-        "st": float(S_T[i]),
-        "spot": float(pl["spot"][i]),
-        "long_put": float(pl["long_put"][i]),
-        "short_put": float(pl["short_put"][i]),
-        "short_call": float(pl["short_call"][i]),
-        "combo": float(pl["combo"][i]),
-    } for i in range(len(S_T))]
-
-    return S_T, pl, rows
-
-
-def _breakevens_from_grid(S_T, y):
-    """
-    グリッド上の合成損益 y（=combo）から損益分岐点を線形補間で抽出。
-    戻り値: 昇順リスト（0〜3本程度）
-    """
+# 損益分岐点（ゼロクロス）検出（他で定義済みでも上書き可）
+def _find_break_evens_generic(S_T, y):
+    S_T = np.asarray(S_T, dtype=float)
+    y = np.asarray(y, dtype=float)
     bes = []
     for i in range(len(S_T) - 1):
         y0, y1 = y[i], y[i+1]
         if y0 == 0.0:
             bes.append(float(S_T[i]))
         elif y0 * y1 < 0.0:
-            # 線形補間
             x0, x1 = S_T[i], S_T[i+1]
-            x = x0 - y0 * (x1 - x0) / (y1 - y0)
-            bes.append(float(x))
-    # 重複やほぼ同一は丸めてユニーク化
-    out = []
+            x = float(x0 + (x1 - x0) * (-y0) / (y1 - y0))
+            bes.append(x)
+    res = []
     for v in sorted(bes):
-        if not out or abs(out[-1] - v) > 1e-6:
-            out.append(v)
-    return out
+        if not res or abs(v - res[-1]) > 1e-6:
+            res.append(v)
+    return res
 
-
-def draw_chart_put_spread_collar(S_T, pl, S0, K1, K2, K3, be_list=None):
-    """
-    P/Lグラフ（Spot/LongPut/ShortPut/ShortCall/Combo）。
-    損益分岐点が与えられれば縦線を描画。
-    """
-    fig = plt.figure(figsize=(7.8, 4.8), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, pl["spot"],       label="Spot USD P/L (vs today)", color="black")
-    ax.plot(S_T, pl["long_put"],   label="Long Put@K1 P/L",         color="blue")
-    ax.plot(S_T, pl["short_put"],  label="Short Put@K2 P/L",        color="orange")
-    ax.plot(S_T, pl["short_call"], label="Short Call@K3 P/L",       color="red")
-    ax.plot(S_T, pl["combo"],      label="Combo (Spot+PutSpread-Call)", color="green", linewidth=2)
-
-    _set_ylim_tight(ax, [pl["spot"], pl["long_put"], pl["short_put"], pl["short_call"], pl["combo"]])
-    ax.axhline(0, linewidth=1)
-
-    # 参考縦線
-    y_top = ax.get_ylim()[1]
-    ax.axvline(S0, linestyle="--", linewidth=1); ax.text(S0, y_top, f"S0={S0:.1f}", va="top", ha="left", fontsize=9)
-    ax.axvline(K1, linestyle=":",  linewidth=1); ax.text(K1, y_top, f"K1={K1:.1f}", va="top", ha="left", fontsize=9)
-    ax.axvline(K2, linestyle=":",  linewidth=1); ax.text(K2, y_top, f"K2={K2:.1f}", va="top", ha="left", fontsize=9)
-    ax.axvline(K3, linestyle=":",  linewidth=1); ax.text(K3, y_top, f"K3={K3:.1f}", va="top", ha="left", fontsize=9)
-
-    # 損益分岐点
-    if be_list:
-        for j, be in enumerate(be_list, 1):
-            ax.axvline(be, linestyle="--", linewidth=1.2)
-            ax.text(be, y_top, f"BE{j}={be:.2f}", va="top", ha="left", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Put-Spread Collar (Export): Long Put@K1 − Short Put@K2 − Short Call@K3")
-    _format_y_as_m(ax)
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
-    return fig
-
-
-def draw_breakeven_focus(S_T, combo_pl, be_list):
-    """
-    合成（Combo）と損益分岐点のみ表示するフォーカス図。
-    """
-    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
-    ax = fig.add_subplot(111)
+def draw_be_focus_generic(S_T, combo_pl, be_list, title):
+    fig = plt.figure(figsize=(7.2, 4.0), dpi=120); ax = fig.add_subplot(111)
     ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Combo P/L")
     _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
-
     y_top = ax.get_ylim()[1]
-    for j, be in enumerate(be_list, 1):
-        ax.axvline(be, linestyle="--", linewidth=1.2, label="Break-even" if j == 1 else None)
-        ax.text(be, y_top, f"BE{j}={be:.2f}", va="top", ha="left", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Put-Spread Collar: Break-even Focus")
-    _format_y_as_m(ax)
-    ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
+    for i, be in enumerate(be_list, start=1):
+        ax.axvline(be, linestyle="--", linewidth=1.5, label=f"BE{i}")
+        ax.text(be, y_top, f"BE{i}={be:.2f}", va="top", ha="left", fontsize=9)
+    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)"); ax.set_ylabel("P/L (JPY)")
+    ax.set_title(title); _format_y_as_m(ax); ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
 
 
-def draw_compare_put_spread_collar(S_T, combo_pl, finance_cost):
+# ---------- Cash-Secured Put ----------
+def payoff_components_cash_secured_put(S_T, Kp, prem_put, qty):
     """
-    合成（Combo）と借入利息の比較（Y軸M表記）。
+    Cash-Secured Put = Put売り（必要現金確保）
+      Short Put P/L  = (prem_put - max(Kp - S_T, 0)) * qty
+      Combo (=Short Put)
     """
-    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
-    ax = fig.add_subplot(111)
+    short_put_pl = (prem_put - np.maximum(Kp - S_T, 0.0)) * qty
+    combo_pl = short_put_pl.copy()
+    return {"short_put": short_put_pl, "combo": combo_pl}
 
-    ax.plot(S_T, combo_pl, linewidth=2, color="green", label="Combo P/L")
-    _set_ylim_tight(ax, [combo_pl]); ax.axhline(0, linewidth=1)
-
-    ymin, ymax = ax.get_ylim()
-    borrow_level = -finance_cost
-    if ymin <= borrow_level <= ymax:
-        ax.axhline(borrow_level, linestyle="--", linewidth=1.5, label="Borrow Cost (flat)")
-    else:
-        pos = "below" if borrow_level < ymin else "above"
-        ax.annotate(f"Borrow cost ≈ {borrow_level/1e6:.1f}M ({pos})",
-                    xy=(S_T[len(S_T)//2], ymin if pos=='below' else ymax),
-                    xytext=(6, -14 if pos=='below' else 6),
-                    textcoords="offset points",
-                    va="top" if pos=='below' else "bottom",
-                    ha="left", fontsize=9)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Compare: Put-Spread Collar Combo vs Borrow")
-    _format_y_as_m(ax)
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
-    return fig
-
-
-# 画面ルート（Put-Spread Collar：輸出向け）
-@app.route("/fx/put-spread-collar", methods=["GET", "POST"])
-def fx_put_spread_collar():
-    defaults = dict(
-        S0=150.0,
-        K1=149.0,   # Long Put
-        K2=145.0,   # Short Put  (< K1)
-        K3=153.0,   # Short Call (> S0)
-        vol=10.0, r_dom=1.6, r_for=4.2,
-        qty=1_000_000,
-        smin=130.0, smax=160.0, points=251,
-        months=1.0,
-        borrow_rate=4.2
-    )
-
-    if request.method == "POST":
-        def fget(name, cast=float, default=None):
-            val = request.form.get(name, "")
-            try: return cast(val)
-            except Exception: return default if default is not None else defaults[name]
-        S0     = fget("S0", float, defaults["S0"])
-        K1     = fget("K1", float, defaults["K1"])
-        K2     = fget("K2", float, defaults["K2"])
-        K3     = fget("K3", float, defaults["K3"])
-        vol    = fget("vol", float, defaults["vol"])
-        r_dom  = fget("r_dom", float, defaults["r_dom"])
-        r_for  = fget("r_for", float, defaults["r_for"])
-        qty    = fget("qty", float, defaults["qty"])
-        smin   = fget("smin", float, defaults["smin"])
-        smax   = fget("smax", float, defaults["smax"])
-        points = int(fget("points", float, defaults["points"]))
-        months = fget("months", float, defaults["months"])
-        borrow_rate = fget("borrow_rate", float, defaults["borrow_rate"])
-    else:
-        S0=defaults["S0"]; K1=defaults["K1"]; K2=defaults["K2"]; K3=defaults["K3"]
-        vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
-        points=defaults["points"]; months=defaults["months"]; borrow_rate=defaults["borrow_rate"]
-
-    points = clamp_points(points)
-
-    # GK式プレミアム（JPY/USD）
-    T = max(months, 0.0001) / 12.0
-    sigma = max(vol, 0.0) / 100.0
-    prem_put1   = garman_kohlhagen_put (S0, K1, r_dom/100.0, r_for/100.0, sigma, T)  # 支払（Long Put）
-    prem_put2   = garman_kohlhagen_put (S0, K2, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Put）
-    prem_call3  = garman_kohlhagen_call(S0, K3, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Call）
-
-    # プレミアム内訳・純額（JPY/USD）
-    premium_in  = prem_put2 + prem_call3     # 受取
-    premium_out = prem_put1                  # 支払
-    premium_net = premium_in - premium_out   # 目標：≈0
-
-    # グリッドと損益
-    S_T, pl, rows = build_grid_and_rows_put_spread_collar(
-        S0, K1, K2, K3, prem_put1, prem_put2, prem_call3,
-        qty, smin, smax, points
-    )
-
-    # 損益分岐点（数値抽出）
-    be_list = _breakevens_from_grid(S_T, pl["combo"])
-
-    # レンジ内の最小/最大損益
-    idx_min = int(np.argmin(pl["combo"]))
-    idx_max = int(np.argmax(pl["combo"]))
-    range_floor    = float(pl["combo"][idx_min]); range_floor_st = float(S_T[idx_min])
-    range_cap      = float(pl["combo"][idx_max]); range_cap_st   = float(S_T[idx_max])
-
-    # プレミアム金額（JPY）
-    prem_put1_jpy  = prem_put1  * qty
-    prem_put2_jpy  = prem_put2  * qty
-    prem_call3_jpy = prem_call3 * qty
-    premium_net_jpy = premium_net * qty
-
-    # 借入利息（表示用）
-    notional_jpy = S0 * qty
-    finance_jpy = notional_jpy * (borrow_rate / 100.0) * (months / 12.0)
-
-    # グラフ①：全体
-    fig = draw_chart_put_spread_collar(S_T, pl, S0, K1, K2, K3, be_list)
-    buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
-    png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-
-    # グラフ②：損益分岐点フォーカス
-    fig_be = draw_breakeven_focus(S_T, pl["combo"], be_list)
-    buf2 = io.BytesIO(); fig_be.savefig(buf2, format="png"); plt.close(fig_be); buf2.seek(0)
-    png_b64_be = base64.b64encode(buf2.getvalue()).decode("ascii")
-
-    # グラフ③：借入比較
-    fig_cmp = draw_compare_put_spread_collar(S_T, pl["combo"], finance_jpy)
-    buf3 = io.BytesIO(); fig_cmp.savefig(buf3, format="png"); plt.close(fig_cmp); buf3.seek(0)
-    png_b64_compare = base64.b64encode(buf3.getvalue()).decode("ascii")
-
-    return render_template(
-        "fx_put_spread_collar.html",
-        png_b64=png_b64, png_b64_be=png_b64_be, png_b64_compare=png_b64_compare,
-        # 入力
-        S0=S0, K1=K1, K2=K2, K3=K3, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
-        smin=smin, smax=smax, points=points, months=months, borrow_rate=borrow_rate,
-        # 出力
-        prem_put1=prem_put1, prem_put2=prem_put2, prem_call3=prem_call3,
-        premium_in=premium_in, premium_out=premium_out, premium_net=premium_net,
-        prem_put1_jpy=prem_put1_jpy, prem_put2_jpy=prem_put2_jpy, prem_call3_jpy=prem_call3_jpy,
-        premium_net_jpy=premium_net_jpy,
-        finance_cost=finance_jpy,
-        be_list=be_list,
-        range_floor=range_floor, range_floor_st=range_floor_st,
-        range_cap=range_cap, range_cap_st=range_cap_st,
-        rows=rows
-    )
-
-
-# CSV（Put-Spread Collar：輸出向け）
-@app.route("/fx/download_csv_put_spread_collar", methods=["POST"])
-def fx_download_csv_put_spread_collar():
-    """
-    出力列: S_T, Spot_PnL, LongPutK1_PnL, ShortPutK2_PnL, ShortCallK3_PnL, Combo_PnL
-    0.25刻み固定
-    """
-    def fget(name, cast=float, default=None):
-        val = request.form.get(name, "")
-        try: return cast(val)
-        except Exception: return default
-
-    S0        = fget("S0", float, 150.0)
-    K1        = fget("K1", float, 149.0)
-    K2        = fget("K2", float, 145.0)
-    K3        = fget("K3", float, 153.0)
-    prem_put1 = fget("prem_put1", float, 0.80)
-    prem_put2 = fget("prem_put2", float, 0.60)
-    prem_call3= fget("prem_call3", float, 0.60)
-    qty       = fget("qty", float, 1_000_000.0)
-    smin      = fget("smin", float, 130.0)
-    smax      = fget("smax", float, 160.0)
-    points    = fget("points", float, 251)
-    step      = 0.25
-
-    S_T, pl, _ = build_grid_and_rows_put_spread_collar(
-        S0, K1, K2, K3, prem_put1, prem_put2, prem_call3, qty, smin, smax, points, step=step
-    )
-
-    import csv, io as _io
-    buf = _io.StringIO()
-    writer = csv.writer(buf, lineterminator="\n")
-    writer.writerow(["S_T(USD/JPY)", "Spot_PnL(JPY)", "LongPutK1_PnL(JPY)", "ShortPutK2_PnL(JPY)", "ShortCallK3_PnL(JPY)", "Combo_PnL(JPY)"])
-    for i in range(len(S_T)):
-        writer.writerow([
-            f"{S_T[i]:.6f}",
-            f"{pl['spot'][i]:.6f}",
-            f"{pl['long_put'][i]:.6f}",
-            f"{pl['short_put'][i]:.6f}",
-            f"{pl['short_call'][i]:.6f}",
-            f"{pl['combo'][i]:.6f}",
-        ])
-
-    data = _io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
-    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="put_spread_collar_export.csv")
-
-# ================= Call-Spread Collar (Import) ====================
-# 構成：現物USDショート + Long Call@K1 − Short Call@K2 − Short Put@K3
-# 目的：上昇（円安）リスクをLong Callで抑えつつ、上側の利益を売りCall、下側は売りPutでコスト低減
-
-def payoff_components_call_spread_collar_import(
-    S_T, S0, K1, K2, K3, prem_call1, prem_call2, prem_put3, qty
-):
-    """
-    現物USDショート、Long Call(K1)、Short Call(K2)、Short Put(K3) の各損益（JPY）。
-      - Spot(short) : (S0 - S_T) * qty
-      - Long Call   : (-prem_call1 + max(S_T - K1, 0)) * qty
-      - Short Call  : ( prem_call2 - max(S_T - K2, 0)) * qty
-      - Short Put   : ( prem_put3  - max(K3 - S_T, 0)) * qty
-      - Combo       : 上記合計
-    prem_* は JPY/USD（買い＝支払、売り＝受取の符号で合算）
-    """
-    spot_short_pl  = (S0 - S_T) * qty
-    long_call_pl   = (-prem_call1 + np.maximum(S_T - K1, 0.0)) * qty
-    short_call_pl  = ( prem_call2 - np.maximum(S_T - K2, 0.0)) * qty
-    short_put_pl   = ( prem_put3  - np.maximum(K3 - S_T, 0.0)) * qty
-    combo_pl       = spot_short_pl + long_call_pl + short_call_pl + short_put_pl
-    return {
-        "spot_short": spot_short_pl,
-        "long_call": long_call_pl,
-        "short_call": short_call_pl,
-        "short_put": short_put_pl,
-        "combo": combo_pl
-    }
-
-
-def build_grid_and_rows_call_spread_collar_import(
-    S0, K1, K2, K3, prem_call1, prem_call2, prem_put3, qty,
-    smin, smax, points, step: float = 0.25
-):
-    """0.25刻みでS_Tグリッド生成し、行データ化。"""
-    if smin > smax:
-        smin, smax = smax, smin
+def build_grid_and_rows_cash_secured_put(Kp, prem_put, qty, smin, smax, points, *, step: float = 0.25):
+    if smin > smax: smin, smax = smax, smin
     S_T = _arange_inclusive(float(smin), float(smax), float(step))
-    pl = payoff_components_call_spread_collar_import(
-        S_T, S0, K1, K2, K3, prem_call1, prem_call2, prem_put3, qty
-    )
+    pl = payoff_components_cash_secured_put(S_T, Kp, prem_put, qty)
     rows = [{
         "st": float(S_T[i]),
-        "spot_short": float(pl["spot_short"][i]),
-        "long_call":  float(pl["long_call"][i]),
-        "short_call": float(pl["short_call"][i]),
-        "short_put":  float(pl["short_put"][i]),
-        "combo":      float(pl["combo"][i]),
+        "short_put": float(pl["short_put"][i]),
+        "combo": float(pl["combo"][i]),
     } for i in range(len(S_T))]
     return S_T, pl, rows
 
+def draw_chart_cash_secured_put(S_T, pl, S0, Kp, be):
+    fig = plt.figure(figsize=(7.6, 4.9), dpi=120); ax = fig.add_subplot(111)
+    ax.plot(S_T, pl["short_put"], label="Short Put P/L", color="blue")
+    ax.plot(S_T, pl["combo"],     label="Combo (Cash-Secured Put)", color="green", linewidth=2)
+    _set_ylim_tight(ax, [pl["short_put"], pl["combo"]]); ax.axhline(0, linewidth=1)
 
-def _breakevens_from_grid(S_T, y):
-    """合成損益yから0交差点を線形補間で抽出（数値だけサマリー表示用）。"""
-    bes = []
-    for i in range(len(S_T)-1):
-        y0, y1 = y[i], y[i+1]
-        if y0 == 0.0:
-            bes.append(float(S_T[i]))
-        elif y0 * y1 < 0.0:
-            x0, x1 = S_T[i], S_T[i+1]
-            x = x0 - y0 * (x1 - x0) / (y1 - y0)
-            bes.append(float(x))
-    out = []
-    for v in sorted(bes):
-        if not out or abs(out[-1] - v) > 1e-6:
-            out.append(v)
-    return out
-
-
-def draw_chart_call_spread_collar_import(S_T, pl, S0, K1, K2, K3):
-    """
-    P/Lグラフ（Spot short / Long Call / Short Call / Short Put / Combo）。
-    損益分岐点の縦線は出しません（数値はサマリーに表示）。
-    """
-    fig = plt.figure(figsize=(7.8, 4.8), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, pl["spot_short"], label="Spot USD Short P/L (vs today)", color="black")
-    ax.plot(S_T, pl["long_call"],  label="Long Call@K1 P/L",            color="blue")
-    ax.plot(S_T, pl["short_call"], label="Short Call@K2 P/L",           color="red")
-    ax.plot(S_T, pl["short_put"],  label="Short Put@K3 P/L",            color="orange")
-    ax.plot(S_T, pl["combo"],      label="Combo (SpotShort+CallSpread−Put)", color="green", linewidth=2)
-
-    _set_ylim_tight(ax, [pl["spot_short"], pl["long_call"], pl["short_call"], pl["short_put"], pl["combo"]])
-    ax.axhline(0, linewidth=1)
-
-    # 参考縦線
     y_top = ax.get_ylim()[1]
-    for x, lbl, ls in [
-        (S0, f"S0={S0:.1f}", "--"),
-        (K1, f"K1={K1:.1f}", ":"),
-        (K2, f"K2={K2:.1f}", ":"),
-        (K3, f"K3={K3:.1f}", ":"),
-    ]:
-        ax.axvline(x, linestyle=ls, linewidth=1)
-        ax.text(x, y_top, lbl, va="top", ha="left", fontsize=9)
+    for x, txt, ls in [(S0, f"S0={S0:.1f}", "--"), (Kp, f"Kp={Kp:.1f}", ":")]:
+        ax.axvline(x, linestyle=ls, linewidth=1); ax.text(x, y_top, txt, va="top", ha="left", fontsize=9)
+    if be is not None:
+        ax.axvline(be, linestyle="--", linewidth=1.2); ax.text(be, y_top, f"BE={be:.2f}", va="top", ha="left", fontsize=9)
 
     ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
     ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Call-Spread Collar (Import): Long Call@K1 − Short Call@K2 − Short Put@K3")
-    _format_y_as_m(ax)
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
+    ax.set_title("Cash-Secured Put: Short Put (P/L)")
+    _format_y_as_m(ax); ax.legend(loc="best"); ax.grid(True, linewidth=0.3); fig.tight_layout()
     return fig
 
-
-def draw_compare_call_spread_collar_import(S_T, combo_pl):
-    """
-    合成（Combo）のみを表示する比較グラフ。スポットラインは描画しない。
-    線色は緑に固定。
-    """
-    fig = plt.figure(figsize=(7.2, 4.0), dpi=120)
-    ax = fig.add_subplot(111)
-
-    ax.plot(S_T, combo_pl, linewidth=2.0, color="green", label="Combo (SpotShort+CallSpread−Put)")
-    _set_ylim_tight(ax, [combo_pl])
-    ax.axhline(0, linewidth=1)
-
-    ax.set_xlabel("Terminal USD/JPY (Spot at Expiry)")
-    ax.set_ylabel("P/L (JPY)")
-    ax.set_title("Compare: Call-Spread Collar (Combo only)")
-    _format_y_as_m(ax)
-    ax.legend(loc="best")
-    ax.grid(True, linewidth=0.3)
-    fig.tight_layout()
-    return fig
-
-
-# 画面ルート（Call-Spread Collar：輸入向け）
-@app.route("/fx/call-spread-collar", methods=["GET", "POST"])
-def fx_call_spread_collar():
+@app.route("/fx/cash-secured-put", methods=["GET", "POST"])
+def fx_cash_secured_put():
     defaults = dict(
-        S0=150.0,
-        K1=151.0,   # Long Call（下側）
-        K2=155.0,   # Short Call（上側）
-        K3=147.0,   # Short Put  （下側）
+        S0=150.0, Kp=148.0,
         vol=10.0, r_dom=1.6, r_for=4.2,
         qty=1_000_000,
-        smin=130.0, smax=160.0, points=251,
-        months=1.0
+        months=1.0,
+        smin=135.0, smax=165.0, points=241
     )
-
     if request.method == "POST":
         def fget(name, cast=float, default=None):
-            val = request.form.get(name, "")
-            try: return cast(val)
+            v = request.form.get(name, "")
+            try: return cast(v)
             except Exception: return default if default is not None else defaults[name]
-        S0=fget("S0"); K1=fget("K1"); K2=fget("K2"); K3=fget("K3")
-        vol=fget("vol"); r_dom=fget("r_dom"); r_for=fget("r_for")
-        qty=fget("qty"); smin=fget("smin"); smax=fget("smax")
-        points=int(fget("points", float, defaults["points"]))
-        months=fget("months")
+        S0=fget("S0"); Kp=fget("Kp"); vol=fget("vol"); r_dom=fget("r_dom"); r_for=fget("r_for")
+        qty=fget("qty"); months=fget("months"); smin=fget("smin"); smax=fget("smax"); points=int(fget("points"))
     else:
-        S0=defaults["S0"]; K1=defaults["K1"]; K2=defaults["K2"]; K3=defaults["K3"]
-        vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
-        qty=defaults["qty"]; smin=defaults["smin"]; smax=defaults["smax"]
-        points=defaults["points"]; months=defaults["months"]
+        S0=defaults["S0"]; Kp=defaults["Kp"]; vol=defaults["vol"]; r_dom=defaults["r_dom"]; r_for=defaults["r_for"]
+        qty=defaults["qty"]; months=defaults["months"]; smin=defaults["smin"]; smax=defaults["smax"]; points=defaults["points"]
 
     points = clamp_points(points)
+    T = max(months, 0.0001)/12.0; sigma=max(vol,0.0)/100.0; rD=r_dom/100.0; rF=r_for/100.0
 
-    # GKプレミアム（JPY/USD）
-    T = max(months, 0.0001) / 12.0
-    sigma = max(vol, 0.0) / 100.0
-    prem_call1 = garman_kohlhagen_call(S0, K1, r_dom/100.0, r_for/100.0, sigma, T)  # 支払（Long Call）
-    prem_call2 = garman_kohlhagen_call(S0, K2, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Call）
-    prem_put3  = garman_kohlhagen_put (S0, K3, r_dom/100.0, r_for/100.0, sigma, T)  # 受取（Short Put）
+    prem_put = garman_kohlhagen_put(S0, Kp, rD, rF, sigma, T)     # 受取（Short）
+    prem_put_jpy = prem_put * qty
 
-    # プレミアム内訳・純額
-    premium_in  = prem_call2 + prem_put3      # 受取
-    premium_out = prem_call1                  # 支払
-    premium_net = premium_in - premium_out
+    be_formula = Kp - prem_put
+    max_loss_per_usd = -(Kp - prem_put)       # S_T→0 の下限
+    max_loss_jpy = max_loss_per_usd * qty     # 負値（損失）
 
-    # グリッド＆損益
-    S_T, pl, rows = build_grid_and_rows_call_spread_collar_import(
-        S0, K1, K2, K3, prem_call1, prem_call2, prem_put3, qty, smin, smax, points
-    )
+    S_T, pl, rows = build_grid_and_rows_cash_secured_put(Kp, prem_put, qty, smin, smax, points)
+    be_list = _find_break_evens_generic(S_T, pl["combo"])
 
-    # 損益分岐点（数値だけ）
-    be_list = _breakevens_from_grid(S_T, pl["combo"])
-
-    # レンジ内最小／最大
-    idx_min = int(np.argmin(pl["combo"]))
-    idx_max = int(np.argmax(pl["combo"]))
+    idx_min = int(np.argmin(pl["combo"])); idx_max = int(np.argmax(pl["combo"]))
     range_floor, range_floor_st = float(pl["combo"][idx_min]), float(S_T[idx_min])
     range_cap,   range_cap_st   = float(pl["combo"][idx_max]), float(S_T[idx_max])
 
-    # 金額表示（JPY）
-    prem_call1_jpy = prem_call1 * qty
-    prem_call2_jpy = prem_call2 * qty
-    prem_put3_jpy  = prem_put3  * qty
-    premium_net_jpy = premium_net * qty
-
-    # グラフ①：全体
-    fig = draw_chart_call_spread_collar_import(S_T, pl, S0, K1, K2, K3)
+    fig = draw_chart_cash_secured_put(S_T, pl, S0, Kp, be_formula)
     buf = io.BytesIO(); fig.savefig(buf, format="png"); plt.close(fig); buf.seek(0)
     png_b64 = base64.b64encode(buf.getvalue()).decode("ascii")
 
-    # グラフ②：現物（無ヘッジ）との比較（借入利息ラインは出さない）
-    fig_cmp = draw_compare_call_spread_collar_import(S_T, pl["combo"])
-    buf2 = io.BytesIO(); fig_cmp.savefig(buf2, format="png"); plt.close(fig_cmp); buf2.seek(0)
-    png_b64_compare = base64.b64encode(buf2.getvalue()).decode("ascii")
+    fig2 = draw_be_focus_generic(S_T, pl["combo"], be_list, "Break-even (Cash-Secured Put)")
+    buf2 = io.BytesIO(); fig2.savefig(buf2, format="png"); plt.close(fig2); buf2.seek(0)
+    png_b64_be = base64.b64encode(buf2.getvalue()).decode("ascii")
 
     return render_template(
-        "fx_call_spread_collar.html",
-        png_b64=png_b64, png_b64_compare=png_b64_compare,
+        "fx_cash_secured_put.html",
+        png_b64=png_b64, png_b64_be=png_b64_be,
         # 入力
-        S0=S0, K1=K1, K2=K2, K3=K3, vol=vol, r_dom=r_dom, r_for=r_for,
-        qty=qty, smin=smin, smax=smax, points=points, months=months,
+        S0=S0, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty, months=months,
+        smin=smin, smax=smax, points=points,
         # 出力
-        prem_call1=prem_call1, prem_call2=prem_call2, prem_put3=prem_put3,
-        prem_call1_jpy=prem_call1_jpy, prem_call2_jpy=prem_call2_jpy, prem_put3_jpy=prem_put3_jpy,
-        premium_in=premium_in, premium_out=premium_out, premium_net=premium_net,
-        premium_net_jpy=premium_net_jpy,
-        be_list=be_list,
+        prem_put=prem_put, prem_put_jpy=prem_put_jpy,
+        be_formula=be_formula, max_loss_per_usd=max_loss_per_usd, max_loss_jpy=max_loss_jpy,
         range_floor=range_floor, range_floor_st=range_floor_st,
         range_cap=range_cap, range_cap_st=range_cap_st,
         rows=rows
     )
 
-
-# CSV（Call-Spread Collar：輸入向け）
-@app.route("/fx/download_csv_call_spread_collar", methods=["POST"])
-def fx_download_csv_call_spread_collar():
+# CSV（Cash-Secured Put）
+@app.route("/fx/download_csv_cash_secured_put", methods=["POST"])
+def fx_download_csv_cash_secured_put():
     def fget(name, cast=float, default=None):
-        val = request.form.get(name, "")
-        try: return cast(val)
+        v = request.form.get(name, "")
+        try: return cast(v)
         except Exception: return default
+    Kp=fget("Kp", float, 148.0)
+    prem_put=fget("prem_put", float, 1.00)
+    qty=fget("qty", float, 1_000_000.0)
+    smin=fget("smin", float, 135.0); smax=fget("smax", float, 165.0); points=fget("points", float, 241)
+    step=0.25
 
-    S0        = fget("S0", float, 150.0)
-    K1        = fget("K1", float, 151.0)
-    K2        = fget("K2", float, 155.0)
-    K3        = fget("K3", float, 147.0)
-    prem_call1= fget("prem_call1", float, 0.90)
-    prem_call2= fget("prem_call2", float, 0.60)
-    prem_put3 = fget("prem_put3",  float, 0.50)
-    qty       = fget("qty", float, 1_000_000.0)
-    smin      = fget("smin", float, 130.0)
-    smax      = fget("smax", float, 160.0)
-    points    = fget("points", float, 251)
-    step      = 0.25
+    S_T, pl, _ = build_grid_and_rows_cash_secured_put(Kp, prem_put, qty, smin, smax, points, step=step)
 
-    S_T, pl, _ = build_grid_and_rows_call_spread_collar_import(
-        S0, K1, K2, K3, prem_call1, prem_call2, prem_put3, qty, smin, smax, points, step=step
-    )
-
-    import csv, io as _io
-    buf = _io.StringIO()
-    w = csv.writer(buf, lineterminator="\n")
-    w.writerow(["S_T(USD/JPY)", "SpotShort_PnL(JPY)", "LongCallK1_PnL(JPY)",
-                "ShortCallK2_PnL(JPY)", "ShortPutK3_PnL(JPY)", "Combo_PnL(JPY)"])
+    import csv, io
+    buf = io.StringIO(); w = csv.writer(buf, lineterminator="\n")
+    w.writerow(["S_T(USD/JPY)", "ShortPut_PnL(JPY)", "Combo_PnL(JPY)"])
     for i in range(len(S_T)):
-        w.writerow([f"{S_T[i]:.6f}",
-                    f"{pl['spot_short'][i]:.6f}",
-                    f"{pl['long_call'][i]:.6f}",
-                    f"{pl['short_call'][i]:.6f}",
-                    f"{pl['short_put'][i]:.6f}",
-                    f"{pl['combo'][i]:.6f}"])
-    data = _io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
-    return send_file(data, mimetype="text/csv", as_attachment=True,
-                     download_name="call_spread_collar_import.csv")
+        w.writerow([f"{S_T[i]:.6f}", f"{pl['short_put'][i]:.6f}", f"{pl['combo'][i]:.6f}"])
+    data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
+    return send_file(data, mimetype="text/csv", as_attachment=True, download_name="cash_secured_put_pnl.csv")
 
 
 # ===============================================================================================================================================

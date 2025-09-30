@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}Big Lizard{% endblock %}
+{% block content %}
+<div class="container py-3">
+  <h3 class="mb-3">Big Lizard（Short Straddle @K1 + Long Call @K2）</h3>
+
+  <!-- 入力 -->
+  <form method="post" class="row g-3">
+    <div class="col-md-2"><label class="form-label">S0</label><input name="S0" class="form-control" type="number" step="0.1" value="{{ S0 }}"></div>
+    <div class="col-md-2"><label class="form-label">K1（Put/Call 短）</label><input name="K1" class="form-control" type="number" step="0.1" value="{{ K1 }}"></div>
+    <div class="col-md-2"><label class="form-label">K2（Long Call）</label><input name="K2" class="form-control" type="number" step="0.1" value="{{ K2 }}"></div>
+
+    <div class="col-md-2"><label class="form-label">Vol (%/年)</label><input name="vol" class="form-control" type="number" step="0.1" value="{{ vol }}"></div>
+    <div class="col-md-2"><label class="form-label">r_dom JPY (%/年)</label><input name="r_dom" class="form-control" type="number" step="0.1" value="{{ r_dom }}"></div>
+    <div class="col-md-2"><label class="form-label">r_for USD (%/年)</label><input name="r_for" class="form-control" type="number" step="0.1" value="{{ r_for }}"></div>
+
+    <div class="col-md-2"><label class="form-label">数量 (USD)</label><input name="qty" class="form-control" type="number" step="1" value="{{ qty }}"></div>
+    <div class="col-md-2"><label class="form-label">満期 (月)</label><input name="months" class="form-control" type="number" step="0.1" value="{{ months }}"></div>
+
+    <div class="col-md-2"><label class="form-label">S最小</label><input name="smin" class="form-control" type="number" step="0.1" value="{{ smin }}"></div>
+    <div class="col-md-2"><label class="form-label">S最大</label><input name="smax" class="form-control" type="number" step="0.1" value="{{ smax }}"></div>
+    <div class="col-md-2"><label class="form-label">ポイント数</label><input name="points" class="form-control" type="number" step="1" value="{{ points }}"></div>
+
+    <div class="col-12"><button class="btn btn-primary">描画</button></div>
+  </form>
+
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">ネット・クレジット（受取 − 支払）</div>
+            <div class="fs-3 fw-bold">{{ "{:,.0f}".format(premium_net_jpy) }} JPY</div>
+            <div class="small mt-1 text-muted">コール幅（K2−K1）：{{ "{:.3f}".format(width_call) }} ／ 余裕：{{ "{:.3f}".format(upside_buffer) }}</div>
+            <div class="small mt-1 text-muted">{{ "上昇側ノーリスク" if upside_buffer >= 0 else "上昇側に損失（定数）" }}</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">損益分岐点（USD/JPY）</div>
+            <div class="fs-6 fw-bold">
+              {% if be_vals|length >= 1 %}BE1: {{ "%.3f"|format(be_vals[0]) }}{% else %}—{% endif %}
+              /
+              {% if be_vals|length >= 2 %}BE2: {{ "%.3f"|format(be_vals[1]) }}{% else %}—{% endif %}
+            </div>
+            <div class="small mt-1 text-muted">BE1 = K1 − NetCredit（下方）／ BE2 = K1 + NetCredit（K1〜K2内）</div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="border rounded p-3 h-100">
+            <div class="small text-muted mb-1">レンジ内損益</div>
+            <div class="fs-6">最大 {{ "{:,.0f}".format(range_cap) }} JPY at {{ "{:.3f}".format(range_cap_st) }}<br>最小 {{ "{:,.0f}".format(range_floor) }} JPY at {{ "{:.3f}".format(range_floor_st) }}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 損益グラフ -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益グラフ（Big Lizard）</div>
+    <div class="card-body"><div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+      <img class="img-fluid border rounded w-100" alt="big-plot" src="data:image/png;base64,{{ png_b64 }}">
+    </div></div></div>
+  </div>
+
+  <!-- 損益分岐点フォーカス -->
+  <div class="card mb-4">
+    <div class="card-header fw-bold">損益分岐点（Break-even）</div>
+    <div class="card-body"><div class="row"><div class="col-12 col-lg-10 col-xl-9 mx-auto">
+      <img class="img-fluid border rounded w-100" alt="big-be" src="data:image/png;base64,{{ png_b64_be }}">
+    </div></div></div>
+  </div>
+
+  <!-- テーブル -->
+  <div class="table-responsive">
+    <table class="table table-sm table-striped">
+      <thead><tr><th>S_T</th><th>ShortPut_K1_PnL</th><th>ShortCall_K1_PnL</th><th>LongCall_K2_PnL</th><th>Combo_PnL</th></tr></thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ "%.3f"|format(r.st) }}</td>
+          <td>{{ "{:,.0f}".format(r.short_put) }}</td>
+          <td>{{ "{:,.0f}".format(r.short_call) }}</td>
+          <td>{{ "{:,.0f}".format(r.long_call) }}</td>
+          <td>{{ "{:,.0f}".format(r.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- CSV -->
+  <form method="post" action="{{ url_for('fx_download_csv_big_lizard') }}">
+    <input type="hidden" name="K1" value="{{ K1 }}"><input type="hidden" name="K2" value="{{ K2 }}">
+    <input type="hidden" name="prem_put1" value="{{ prem_put1 }}"><input type="hidden" name="prem_call1" value="{{ prem_call1 }}"><input type="hidden" name="prem_call2" value="{{ prem_call2 }}">
+    <input type="hidden" name="qty" value="{{ qty }}"><input type="hidden" name="smin" value="{{ smin }}"><input type="hidden" name="smax" value="{{ smax }}"><input type="hidden" name="points" value="{{ points }}">
+    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+  </form>
+</div>
+{% endblock %}

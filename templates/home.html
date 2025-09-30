@@ -2,7 +2,7 @@
 {% block title %}ホーム | Finance Suite{% endblock %}
 
 {% block content %}
-  <h3 class="mb-3"> FXオプション</h3>
+  <h3 class="mb-3"> FX (メイン) オプション</h3>
 
   <!-- 金融電卓を表示しない場合は中央寄せ -->
   <div class="row {% if not show_fin_tools %}justify-content-center{% endif %}">
@@ -11,7 +11,7 @@
     <div class="col-md-6 {% if not show_fin_tools %}offset-md-0{% endif %}">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
-          <h5 class="card-title">FX Options Visualizer</h5>
+          <h5 class="card-title">FX Options（ロング）</h5>
           <p class="card-text small">Protective Put / Call の損益を可視化、CSV出力も可。</p>
           <a href="{{ url_for('fx_put') }}" class="btn btn-outline-secondary me-2">Put（買い）</a>
           <a href="{{ url_for('fx_call') }}" class="btn btn-outline-success">Call（買い）</a>
@@ -23,7 +23,7 @@
     <div class="col-md-6 mt-3 mt-md-0">
       <div class="card h-100 shadow-sm">
         <div class="card-body">
-          <h5 class="card-title">FX Options Visualizer（ショート）</h5>
+          <h5 class="card-title">FX Options（ショート）</h5>
           <p class="card-text small">Covered Put / Covered Call の損益を可視化、CSV出力も可。</p>
           <a href="{{ url_for('fx_put_sell') }}" class="btn btn-outline-secondary me-2">Put（売り）</a>
           <a href="{{ url_for('fx_call_sell') }}" class="btn btn-outline-success">Call（売り）</a>

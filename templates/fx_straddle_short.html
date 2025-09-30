@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="container mt-4">
+  <h2>FX Short Straddle シミュレーション</h2>
+
+  <!-- 入力フォーム -->
+  <form method="post" class="row g-3 mb-4">
+    <div class="col-md-2">
+      <label class="form-label">Spot (S0)</label>
+      <input type="number" step="0.01" class="form-control" name="S0" value="{{ S0 }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Strike (K)</label>
+      <input type="number" step="0.01" class="form-control" name="K" value="{{ K }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Vol (%)</label>
+      <input type="number" step="0.01" class="form-control" name="vol" value="{{ vol }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">JPY Rate (%)</label>
+      <input type="number" step="0.01" class="form-control" name="r_dom" value="{{ r_dom }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">USD Rate (%)</label>
+      <input type="number" step="0.01" class="form-control" name="r_for" value="{{ r_for }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Notional (USD)</label>
+      <input type="number" step="1000" class="form-control" name="qty" value="{{ qty }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Range Min</label>
+      <input type="number" step="0.1" class="form-control" name="smin" value="{{ smin }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Range Max</label>
+      <input type="number" step="0.1" class="form-control" name="smax" value="{{ smax }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Points</label>
+      <input type="number" class="form-control" name="points" value="{{ points }}">
+    </div>
+    <div class="col-md-2">
+      <label class="form-label">Maturity (months)</label>
+      <input type="number" step="0.1" class="form-control" name="months" value="{{ months }}">
+    </div>
+    <div class="col-md-2 align-self-end">
+      <button type="submit" class="btn btn-primary w-100">Run</button>
+    </div>
+  </form>
+
+  <!-- 出力カード -->
+  <!-- サマリー -->
+<div class="card mb-4">
+  <div class="card-header">サマリー</div>
+  <div class="card-body">
+    {% set notional_jpy = (qty|default(0)) * (S0|default(0)) %}
+    {% set premium_ratio = ((premium_sum_jpy|default(0)) / (notional_jpy if notional_jpy>0 else 1) * 100) %}
+
+    <div class="row g-3">
+      <!-- 1) オプション合計プレミアム（受取） -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <div class="text-muted small mb-1">オプション合計プレミアム（受取）</div>
+            <div class="fs-3 fw-bold">
+              {{ "{:,.0f}".format((premium_sum_jpy | default(0))) }} JPY
+            </div>
+            <div class="text-muted">
+              Call {{ "{:,.0f}".format((prem_call_jpy | default(0))) }}
+              / Put {{ "{:,.0f}".format((prem_put_jpy | default(0))) }}
+            </div>
+            <div class="text-muted">
+              名目比:
+              {% if notional_jpy > 0 %}
+                {{ "{:,.2f}".format(premium_ratio) }}%
+              {% else %}-{% endif %}
+            </div>
+            <small class="text-muted d-block mt-1">※ショートのためプレミアムは受け取り（+）です</small>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2) 損益分岐点（USD/JPY） -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <div class="text-muted small mb-1">損益分岐点（USD/JPY）</div>
+            <div class="fs-5 fw-bold">
+              Lower: {{ "{:,.3f}".format((be_low  | default(0))) }}
+              / Upper: {{ "{:,.3f}".format((be_high | default(0))) }}
+            </div>
+            <div class="text-muted">
+              K − (Call+Put),&nbsp;K + (Call+Put)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3) レンジ内損益（最小/最大） -->
+      <div class="col-md-4">
+        <div class="card h-100">
+          <div class="card-body text-center">
+            <div class="text-muted small mb-1">レンジ内損益</div>
+            <div class="mb-2">
+              <span class="text-muted">最小:</span>
+              <span class="fs-5 fw-bold">{{ "{:,.0f}".format((range_floor | default(0))) }} JPY</span>
+              <span class="text-muted">（S_T={{ "{:,.3f}".format((range_floor_st | default(0))) }}）</span>
+            </div>
+            <div>
+              <span class="text-muted">最大:</span>
+              <span class="fs-5 fw-bold">{{ "{:,.0f}".format((range_cap | default(0))) }} JPY</span>
+              <span class="text-muted">（S_T={{ "{:,.3f}".format((range_cap_st | default(0))) }}）</span>
+            </div>
+            <div class="text-muted mt-1">
+              レンジ：{{ "{:,.1f}".format((smin | default(0))) }}〜{{ "{:,.1f}".format((smax | default(0))) }}
+            </div>
+            <small class="text-muted d-block mt-1">※相場が大きく動くと損失は無制限に拡大し得ます</small>
+          </div>
+        </div>
+      </div>
+    </div><!-- /.row -->
+  </div><!-- /.card-body -->
+</div><!-- /.card -->
+
+
+  <!-- グラフ：上＝損益、下＝BE強調 -->
+  <div class="row mb-5">
+  <div class="col-md-6 text-center">
+    <h5>Short Straddle 損益グラフ</h5>
+    <img src="data:image/png;base64,{{ png_b64 }}" class="img-fluid" alt="Short Straddle Chart">
+  </div>
+  <div class="col-md-6 text-center">
+    <h5>損益分岐点（Short Straddle）</h5>
+    <img src="data:image/png;base64,{{ png_b64_short_be }}" class="img-fluid" alt="Break-even Chart">
+  </div>
+</div>
+
+
+  <!-- テーブル -->
+  <div class="mb-4">
+    <h5>損益テーブル</h5>
+    <form action="{{ url_for('fx_download_csv_straddle_short') }}" method="post">
+      <input type="hidden" name="K" value="{{ K }}">
+      <input type="hidden" name="prem_call" value="{{ prem_call }}">
+      <input type="hidden" name="prem_put" value="{{ prem_put }}">
+      <input type="hidden" name="qty" value="{{ qty }}">
+      <input type="hidden" name="smin" value="{{ smin }}">
+      <input type="hidden" name="smax" value="{{ smax }}">
+      <input type="hidden" name="points" value="{{ points }}">
+      <button type="submit" class="btn btn-sm btn-success mb-2">CSVダウンロード</button>
+    </form>
+    <table class="table table-striped table-sm">
+      <thead>
+        <tr>
+          <th>Rate (USD/JPY)</th>
+          <th>Short Call (JPY)</th>
+          <th>Short Put (JPY)</th>
+          <th>Combo (JPY)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+        <tr>
+          <td>{{ "{:,.2f}".format(row.st) }}</td>
+          <td>{{ "{:,.0f}".format(row.short_call) }}</td>
+          <td>{{ "{:,.0f}".format(row.short_put) }}</td>
+          <td>{{ "{:,.0f}".format(row.combo) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+</div>
+
+{% endblock %}
