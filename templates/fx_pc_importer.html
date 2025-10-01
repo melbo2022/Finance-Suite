@@ -72,65 +72,129 @@
     </div>
   </form>
 
-  <!-- 結果表示 -->
-  <div class="row">
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h5>プレミアム</h5>
-        <p>Call Premium: {{ "{:,.6f}".format(prem_call|default(0)) }} USD ({{ "{:,.0f}".format(prem_call_jpy|default(0)) }} JPY)</p>
-        <p>Put Premium: {{ "{:,.6f}".format(prem_put|default(0)) }} USD ({{ "{:,.0f}".format(prem_put_jpy|default(0)) }} JPY)</p>
+  <!-- サマリー -->
+  <div class="card my-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">サマリー</span>
+      <a
+        class="btn btn-sm btn-outline-primary"
+        href="{{ url_for('static', filename='reports/participating_collar_importer_report.pdf') }}"
+        target="_blank" rel="noopener"
+      >デフォルト報告書</a>
+    </div>
+    <div class="card-body">
+      <div class="row g-3 text-center">
+
+        <!-- オプション純額 -->
+        <div class="col-md-4">
+          <div class="card h-100 p-3">
+            <div class="fw-semibold mb-1">オプション純額（受取 − 支払）</div>
+            <div class="fs-4 fw-bold text-primary">
+              {{ "{:,.0f}".format(opt_net|default(0)) }} JPY
+            </div>
+            <div class="small text-muted mt-2">
+              受取 (Put)：{{ "{:,.0f}".format(prem_put_jpy|default(0)) }} JPY<br>
+              支払 (Call)：{{ "{:,.0f}".format(prem_call_jpy|default(0)) }} JPY<br>
+              名目比（純額）：{{ "{:.2%}".format(opt_net_ratio|default(0)) }}<br>
+              （Put Premium {{ "{:,.4f}".format(prem_put|default(0)) }} × {{ "{:,.0f}".format(qty|default(0)) }} USD /
+               Call Premium {{ "{:,.4f}".format(prem_call|default(0)) }} × {{ "{:,.0f}".format(qty|default(0)) }} USD）
+            </div>
+          </div>
+        </div>
+
+        <!-- 借入利息 -->
+        <div class="col-md-4">
+          <div class="card h-100 p-3">
+            <div class="fw-semibold mb-1">借入利息</div>
+            <div class="fs-4 fw-bold text-danger">
+              {{ "{:,.0f}".format(interest_jpy|default(0)) }} JPY
+            </div>
+            <div class="small text-muted mt-2">
+              （年率 {{ "{:.2f}".format(r_for|default(0)) }}% × {{ "{:.1f}".format(months|default(0)) }}ヶ月 /
+              元本：{{ "{:,.0f}".format(S0 * qty|default(0)) }} JPY）
+            </div>
+          </div>
+        </div>
+
+        <!-- レンジ内最小損益 -->
+        <div class="col-md-4">
+          <div class="card h-100 p-3">
+            <div class="fw-semibold mb-1">レンジ内最小損益</div>
+            <div class="fs-4 fw-bold text-danger">
+              {{ "{:,.0f}".format(min_pnl|default(0)) }} JPY
+            </div>
+            <div class="small text-muted mt-2">
+              at S_T = {{ "{:,.3f}".format(st_label|default(0)) }} (USD/JPY)<br>
+              レンジ：{{ "{:,.1f}".format(smin|default(0)) }} 〜 {{ "{:,.1f}".format(smax|default(0)) }}
+            </div>
+          </div>
+        </div>
+
+      </div> <!-- /.row -->
+    </div> <!-- /.card-body -->
+  </div> <!-- /.card -->
+
+  <!-- 英語ラベルの日本語解説（追加） -->
+  <div class="card my-3">
+    <div class="card-header">
+      <span class="fw-bold">英語ラベルの日本語解説</span>
+    </div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><span class="fw-semibold">Short USD P/L (Importer baseline)</span> … 現物USDショート（将来USD支払）の損益（本日時点比）。</li>
+        <li><span class="fw-semibold">Long Call P/L</span> … コール買いの損益（支払プレミアム込み）。</li>
+        <li><span class="fw-semibold">Short Put P/L</span> … プット売りの損益（受取プレミアム込み）。</li>
+        <li><span class="fw-semibold">Combo (Short USD + Call - Put)</span> … 合成損益（USDショート＋コール買い＋プット売り）。</li>
+        <li><span class="fw-semibold">Zero-Cost Combo P/L</span> … 上記「合成損益」の線（ヘッジ比較グラフ）。</li>
+        <li><span class="fw-semibold">Borrow Cost (flat)</span> … 借入利息の一定ライン（フラット）。</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 計算データ一覧 -->
+  <div class="card my-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">計算データ一覧</span>
+      <!-- CSVダウンロード -->
+      <form method="post" action="{{ url_for('fx_download_csv_zero_cost_longcall') }}" class="mb-0">
+        <input type="hidden" name="S0" value="{{ S0 }}">
+        <input type="hidden" name="Kc" value="{{ Kc }}">
+        <input type="hidden" name="Kp" value="{{ Kp }}">
+        <input type="hidden" name="prem_call" value="{{ prem_call }}">
+        <input type="hidden" name="prem_put" value="{{ prem_put }}">
+        <input type="hidden" name="qty" value="{{ qty }}">
+        <input type="hidden" name="smin" value="{{ smin }}">
+        <input type="hidden" name="smax" value="{{ smax }}">
+        <input type="hidden" name="points" value="{{ points }}">
+        <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+      </form>
+    </div>
+
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped mb-0">
+          <thead>
+            <tr>
+              <th>S_T (USD/JPY)</th>
+              <th class="text-end">Long Call PnL (JPY)</th>
+              <th class="text-end">Short Put × r PnL (JPY)</th>
+              <th class="text-end">Spot Short PnL (JPY)</th>
+              <th class="text-end">Combo PnL (JPY)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in rows %}
+            <tr>
+              <td>{{ "{:,.2f}".format(row.st) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(row.long_call) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(row.short_put) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(row.spot) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(row.combo) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
       </div>
-    </div>
-    <div class="col-md-6">
-      <div class="card p-3">
-        <h5>Break-even</h5>
-        <p>Lower: {{ "{:,.2f}".format(be_low  or 0) }}</p>
-        <p>Upper: {{ "{:,.2f}".format(be_high or 0) }}</p>
-      </div>
-    </div>
-  </div>
-
-  <!-- グラフ表示 -->
-  <div class="row mt-4">
-    <div class="col-12">
-      <h5>損益グラフ</h5>
-      <img src="data:image/png;base64,{{ png_b64 }}" class="img-fluid" alt="P/L chart">
-    </div>
-  </div>
-
-  <div class="row mt-4">
-    <div class="col-12">
-      <h5>損益分岐点グラフ</h5>
-      <img src="data:image/png;base64,{{ png_b64_be }}" class="img-fluid" alt="Break-even chart">
-    </div>
-  </div>
-
-  <!-- 損益テーブル -->
-  <div class="row mt-4">
-    <div class="col-12">
-      <h5>損益テーブル</h5>
-      <table class="table table-sm table-bordered">
-        <thead>
-          <tr>
-            <th>Spot</th>
-            <th>Long Call</th>
-            <th>Short Put × r</th>
-            <th>Spot Short</th>
-            <th>Combo</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in rows %}
-          <tr>
-            <td>{{ "{:,.2f}".format(row.st) }}</td>
-            <td>{{ "{:,.0f}".format(row.long_call) }}</td>
-            <td>{{ "{:,.0f}".format(row.short_put) }}</td>
-            <td>{{ "{:,.0f}".format(row.spot) }}</td>
-            <td>{{ "{:,.0f}".format(row.combo) }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
     </div>
   </div>
 

@@ -23,9 +23,19 @@
 
   <!-- サマリー -->
   <div class="card my-4">
-    <div class="card-header fw-bold">サマリー</div>
-    <div class="card-body">
-      <div class="row g-3 text-center">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">サマリー</span>
+    <a
+      class="btn btn-sm btn-outline-primary"
+      href="{{ url_for('static', filename='reports/seagull_strategy_report.pdf') }}"
+      target="_blank" rel="noopener"
+    >デフォルト報告書</a>
+  </div>
+  
+  <div class="card-body">
+    <div class="row g-3 text-center">
+
+
         <!-- ネット・プレミアム -->
         <div class="col-md-4">
           <div class="border rounded p-3 h-100">
@@ -102,45 +112,52 @@
     </div>
   </div>
 
-  <!-- テーブル -->
-  <div class="table-responsive">
-    <table class="table table-sm table-striped">
-      <thead>
-        <tr>
-          <th>S_T (USD/JPY)</th>
-          <th>LongPut_PnL (JPY)</th>
-          <th>ShortCallKc1_PnL (JPY)</th>
-          <th>LongCallKc2_PnL (JPY)</th>
-          <th>Combo_PnL (JPY)</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>{{ "%.3f"|format(r.st) }}</td>
-          <td>{{ "{:,.0f}".format(r.long_put) }}</td>
-          <td>{{ "{:,.0f}".format(r.short_call1) }}</td>
-          <td>{{ "{:,.0f}".format(r.long_call2) }}</td>
-          <td>{{ "{:,.0f}".format(r.combo) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <!-- 計算データ一覧 -->
+<div class="card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">計算データ一覧</span>
+    <!-- CSVダウンロード -->
+    <form method="post" action="{{ url_for('fx_download_csv_seagull') }}" class="mb-0">
+      <input type="hidden" name="Kp" value="{{ Kp }}">
+      <input type="hidden" name="Kc1" value="{{ Kc1 }}">
+      <input type="hidden" name="Kc2" value="{{ Kc2 }}">
+      <input type="hidden" name="prem_put" value="{{ prem_put }}">
+      <input type="hidden" name="prem_call1" value="{{ prem_call1 }}">
+      <input type="hidden" name="prem_call2" value="{{ prem_call2 }}">
+      <input type="hidden" name="qty" value="{{ qty }}">
+      <input type="hidden" name="smin" value="{{ smin }}">
+      <input type="hidden" name="smax" value="{{ smax }}">
+      <input type="hidden" name="points" value="{{ points }}">
+      <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+    </form>
   </div>
 
-  <!-- CSVダウンロード -->
-  <form method="post" action="{{ url_for('fx_download_csv_seagull') }}">
-    <input type="hidden" name="Kp" value="{{ Kp }}">
-    <input type="hidden" name="Kc1" value="{{ Kc1 }}">
-    <input type="hidden" name="Kc2" value="{{ Kc2 }}">
-    <input type="hidden" name="prem_put" value="{{ prem_put }}">
-    <input type="hidden" name="prem_call1" value="{{ prem_call1 }}">
-    <input type="hidden" name="prem_call2" value="{{ prem_call2 }}">
-    <input type="hidden" name="qty" value="{{ qty }}">
-    <input type="hidden" name="smin" value="{{ smin }}">
-    <input type="hidden" name="smax" value="{{ smax }}">
-    <input type="hidden" name="points" value="{{ points }}">
-    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
-  </form>
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped">
+        <thead>
+          <tr>
+            <th>S_T (USD/JPY)</th>
+            <th>LongPut_PnL (JPY)</th>
+            <th>ShortCallKc1_PnL (JPY)</th>
+            <th>LongCallKc2_PnL (JPY)</th>
+            <th>Combo_PnL (JPY)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ "%.3f"|format(r.st) }}</td>
+            <td>{{ "{:,.0f}".format(r.long_put) }}</td>
+            <td>{{ "{:,.0f}".format(r.short_call1) }}</td>
+            <td>{{ "{:,.0f}".format(r.long_call2) }}</td>
+            <td>{{ "{:,.0f}".format(r.combo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
+
 {% endblock %}

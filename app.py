@@ -11,6 +11,7 @@ import numpy as np
 import math
 from datetime import datetime as dt, date
 from math import isfinite, log, log1p, exp
+import os
 
 # ------- Matplotlib (headless, portable fonts) -------
 import matplotlib
@@ -36,7 +37,44 @@ def inject_flags():
         "show_fin_tools": app.config.get("SHOW_FIN_TOOLS", True)
     }
 
-#-----------------------------------------------------------------------------------------
+#説明書PDF----------------------------------------------------------------------------------------
+# 置き場所: your_project/static/docs/ にPDFを保存
+DOCS_DIR = os.path.join(app.static_folder, "docs")
+
+# ルート -> PDFファイル名 の対応表（あとで自由に足せます）
+DOCS = {
+    # 輸出向け
+    "fx_put": "protective_put_exporter.pdf",
+    "fx_zero_cost": "zero_cost_exporter.pdf",
+    "fx_participating_collar": "participating_collar_exporter.pdf",
+    "fx_seagull": "seagull_exporter.pdf",
+    "fx_risk_reversal_short": "risk_reversal_short_exporter.pdf",
+    "fx_put_spread_collar": "put_spread_collar_exporter.pdf",
+    # 輸入向け
+    "fx_call": "protective_call_importer.pdf",
+    "fx_zero_cost_long_call": "zero_cost_importer.pdf",
+    "fx_pc_importer": "participating_collar_importer.pdf",
+    "fx_seagull_importer": "seagull_importer.pdf",
+    "fx_risk_reversal": "risk_reversal_importer.pdf",
+    "fx_call_spread_collar": "call_spread_collar_importer.pdf",
+}
+
+@app.context_processor
+def inject_doc_url_helper():
+    """
+    Jinjaから doc_url('route_name') でPDFのURLを取得。
+    - 対応表に無い or ファイル未設置なら None を返す。
+    """
+    def doc_url(route_name: str):
+        filename = DOCS.get(route_name)
+        if not filename:
+            return None
+        abspath = os.path.join(DOCS_DIR, filename)
+        if os.path.exists(abspath):
+            return url_for("static", filename=f"docs/{filename}")
+        return None
+    return dict(doc_url=doc_url)
+
 
 # =====================================================
 # ================ Option Calcurate =================
@@ -9073,6 +9111,8 @@ def fx_download_csv_participating_collar():
 
 # ================= Participating Collar (Importer) =================
 
+# ================= Participating Collar (Importer) =================
+
 def payoff_components_participating_collar_importer(S_T, S0, Kc, Kp, prem_call, prem_put, qty, r):
     """
     Participating Collar（輸入向け）
@@ -9135,7 +9175,6 @@ def draw_chart_pc_importer(S_T, pl, S0, Kc, Kp, be_vals, r):
     return fig
 
 
-# --- 追加：損益分岐点フォーカス用グラフ ---
 def draw_pc_importer_breakeven(S_T, combo_pl, be_vals, r):
     """
     Participating Collar Importer 損益分岐点フォーカス（借入ラインなし）
@@ -9205,8 +9244,15 @@ def fx_pc_importer():
     prem_put  = garman_kohlhagen_put (S0, Kp, r_dom/100.0, r_for/100.0, sigma, T)
 
     # JPY換算
-    prem_call_jpy = prem_call * qty
-    prem_put_jpy  = prem_put  * qty
+    prem_call_jpy = prem_call * qty                   # コール買い（支払）
+    prem_put_jpy  = prem_put  * qty                   # プット売り受取（100%）
+    prem_put_jpy_effective = r * prem_put_jpy         # 参加率 r を掛けた実受取
+
+    # サマリー計算
+    notion_jpy = S0 * qty
+    opt_net = prem_put_jpy_effective - prem_call_jpy
+    opt_net_ratio = (opt_net / notion_jpy) if notion_jpy > 0 else 0.0
+    interest_jpy = (r_for / 100.0) * (months / 12.0) * notion_jpy
 
     # グリッド
     S_T, pl, rows = build_grid_and_rows_pc_importer(S0, Kc, Kp, prem_call, prem_put, qty, r, smin, smax, points)
@@ -9215,6 +9261,11 @@ def fx_pc_importer():
     be_vals = _find_breakevens_from_grid(S_T, pl["combo"])
     be_low  = be_vals[0] if len(be_vals) > 0 else None
     be_high = be_vals[1] if len(be_vals) > 1 else None
+
+    # レンジ内最小損益
+    idx_min = int(np.argmin(pl["combo"]))
+    min_pnl = float(pl["combo"][idx_min])
+    st_label = float(S_T[idx_min])
 
     # グラフ①：全体P/L
     fig = draw_chart_pc_importer(S_T, pl, S0, Kc, Kp, be_vals, r)
@@ -9233,15 +9284,21 @@ def fx_pc_importer():
         # 入力
         S0=S0, Kc=Kc, Kp=Kp, vol=vol, r_dom=r_dom, r_for=r_for, qty=qty,
         r=r, smin=smin, smax=smax, points=points, months=months,
-        # 出力
+        # 出力（サマリー）
         prem_call=prem_call, prem_put=prem_put,
-        prem_call_jpy=prem_call_jpy, prem_put_jpy=prem_put_jpy,
+        prem_call_jpy=prem_call_jpy,
+        prem_put_jpy=prem_put_jpy_effective,  # ← r を掛けた実受取を渡す
+        opt_net=opt_net,
+        opt_net_ratio=opt_net_ratio,
+        interest_jpy=interest_jpy,
+        min_pnl=min_pnl,
+        st_label=st_label,
         be_low=be_low, be_high=be_high,
         rows=rows
     )
 
 
-# === 追加：CSVダウンロード用エンドポイント（HTMLの url_for と一致） ===
+# === CSVダウンロード用エンドポイント ===
 @app.route("/fx/download_csv_pc_importer", methods=["POST"])
 def fx_download_csv_pc_importer():
     """
@@ -9284,6 +9341,7 @@ def fx_download_csv_pc_importer():
 
     data = io.BytesIO(buf.getvalue().encode("utf-8-sig")); data.seek(0)
     return send_file(data, mimetype="text/csv", as_attachment=True, download_name="pc_importer_pnl.csv")
+
 
 # ===================== Conversion / Reversal =====================
 # 依存：np, plt, io, base64, request, render_template, send_file

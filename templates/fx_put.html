@@ -66,19 +66,28 @@
         </div>
 
         <div class="col-12">
-          <button class="btn btn-primary">Update Chart</button>
-          <a class="btn btn-outline-success ms-2" href="{{ url_for('fx_call') }}">→ Callページへ</a>
-          <span class="ms-2 form-note">* グラフ内の文字は英語。日本語の解説は本ページで補足表示します。</span>
+          <button class="btn btn-primary">描画</button>
+         
         </div>
       </form>
     </div>
   </div>
 
   <!-- ▼ コストサマリー（合計カードなし） -->
-  <div class="card shadow-sm mb-4">
-    <div class="card-header fw-bold">コストサマリー</div>
-    <div class="card-body">
-      <div class="row g-3 text-center">
+  <div class="card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">サマリー</span>
+    <a
+      class="btn btn-sm btn-outline-primary"
+      href="{{ url_for('static', filename='reports/protective_put_report.pdf') }}"
+      target="_blank" rel="noopener"
+    >デフォルト報告書</a>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 text-center">
+
+
+
         <div class="col-12 col-md-4">
           <div class="p-3 border rounded-3 h-100">
             <div class="text-muted small mb-1">オプション料</div>
@@ -167,28 +176,36 @@
   </div>
 
   <!-- ▼ 計算データ一覧 -->
-  <div class="card shadow-sm">
-    <div class="card-header d-flex justify-content-between align-items-center">
-      <span class="fw-bold">計算データ一覧</span>
-      <form method="post" action="{{ url_for('fx_download_csv_put') }}" class="m-0">
-        <input type="hidden" name="S0" value="{{ S0 }}">
-        <input type="hidden" name="K" value="{{ K }}">
-        <input type="hidden" name="premium" value="{{ premium }}">
-        <input type="hidden" name="qty" value="{{ qty }}">
-        <input type="hidden" name="smin" value="{{ smin }}">
-        <input type="hidden" name="smax" value="{{ smax }}">
-        <input type="hidden" name="points" value="{{ points }}">
-        <button class="btn btn-sm btn-outline-secondary">CSVダウンロード</button>
-      </form>
-    </div>
-    <div class="card-body table-scroll p-0">
-      <table class="table table-sm table-hover mb-0">
-        <thead class="table-light">
+<div class="card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">計算データ一覧</span>
+    <form method="post" action="{{ url_for('fx_download_csv_put') }}" class="mb-0">
+      <input type="hidden" name="S0" value="{{ S0 }}">
+      <input type="hidden" name="K" value="{{ K }}">
+      <input type="hidden" name="premium" value="{{ premium }}">
+      <input type="hidden" name="qty" value="{{ qty }}">
+      <input type="hidden" name="smin" value="{{ smin }}">
+      <input type="hidden" name="smax" value="{{ smax }}">
+      <input type="hidden" name="points" value="{{ points }}">
+      <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+    </form>
+  </div>
+
+  <div class="card-body">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0" style="table-layout: fixed; width: 100%;">
+        <colgroup>
+          <col style="width: 25%;">
+          <col style="width: 25%;">
+          <col style="width: 25%;">
+          <col style="width: 25%;">
+        </colgroup>
+        <thead>
           <tr>
             <th>S_T (USD/JPY)</th>
-            <th>Spot P/L (JPY)</th>
-            <th>Put P/L (JPY)</th>
-            <th>Combo P/L (JPY)</th>
+            <th class="text-end">Spot P/L (JPY)</th>
+            <th class="text-end">Put P/L (JPY)</th>
+            <th class="text-end">Combo P/L (JPY)</th>
           </tr>
         </thead>
         <tbody>
@@ -204,4 +221,6 @@
       </table>
     </div>
   </div>
+</div>
+
 {% endblock %}

@@ -28,10 +28,14 @@
 
   <!-- サマリー -->
   <div class="card my-4">
-    <div class="card-header fw-bold">サマリー</div>
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">サマリー</span>
+      <a class="btn btn-sm btn-outline-primary"
+         href="{{ url_for('static', filename='reports/call_spread_collar_importer_report.pdf') }}"
+         target="_blank" rel="noopener">デフォルト報告書</a>
+    </div>
     <div class="card-body">
       <div class="row g-3 text-center">
-
         <!-- プレミアム純額と内訳 -->
         <div class="col-md-4">
           <div class="border rounded p-3 h-100">
@@ -44,22 +48,18 @@
             </div>
           </div>
         </div>
-
-        <!-- 損益分岐点（数値のみ） -->
+        <!-- 損益分岐点 -->
         <div class="col-md-4">
           <div class="border rounded p-3 h-100">
             <div class="small text-muted mb-1">損益分岐点（USD/JPY）</div>
             <div class="fs-6 fw-bold">
               {% if be_list and be_list|length>0 %}
                 {% for v in be_list %}BE{{ loop.index }} = {{ "{:.3f}".format(v) }}{% if not loop.last %} ／ {% endif %}{% endfor %}
-              {% else %}
-                なし（レンジ内で常に損益一定符号）
-              {% endif %}
+              {% else %}なし（レンジ内で常に損益一定符号）{% endif %}
             </div>
             <div class="small mt-1 text-muted">※ Combo（SpotShort+CallSpread−Put）の0交差を線形補間で抽出</div>
           </div>
         </div>
-
         <!-- レンジ内損益 -->
         <div class="col-md-4">
           <div class="border rounded p-3 h-100">
@@ -70,12 +70,11 @@
             </div>
           </div>
         </div>
-
       </div>
     </div>
   </div>
 
-  <!-- グラフ①：損益（構成要素＋合成） -->
+  <!-- グラフ①：損益 -->
   <div class="card mb-4">
     <div class="card-header fw-bold">損益グラフ（Call-Spread Collar：P/L vs Terminal USD/JPY）</div>
     <div class="card-body">
@@ -87,7 +86,7 @@
     </div>
   </div>
 
-  <!-- グラフ②：無ヘッジ（Spotショート）との比較 -->
+  <!-- グラフ②：比較 -->
   <div class="card mb-4">
     <div class="card-header fw-bold">ヘッジ比較（No Hedge vs Call-Spread Collar）</div>
     <div class="card-body">
@@ -99,48 +98,73 @@
     </div>
   </div>
 
-  <!-- テーブル -->
-  <div class="table-responsive">
-    <table class="table table-sm table-striped">
-      <thead>
-        <tr>
-          <th>S_T (USD/JPY)</th>
-          <th>SpotShort_PnL (JPY)</th>
-          <th>LongCallK1_PnL (JPY)</th>
-          <th>ShortCallK2_PnL (JPY)</th>
-          <th>ShortPutK3_PnL (JPY)</th>
-          <th>Combo_PnL (JPY)</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>{{ "%.3f"|format(r.st) }}</td>
-          <td>{{ "{:,.0f}".format(r.spot_short) }}</td>
-          <td>{{ "{:,.0f}".format(r.long_call) }}</td>
-          <td>{{ "{:,.0f}".format(r.short_call) }}</td>
-          <td>{{ "{:,.0f}".format(r.short_put) }}</td>
-          <td>{{ "{:,.0f}".format(r.combo) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <!-- ▼▼ ここから挿入：英語ラベルの日本語解説 ▼▼ -->
+  <div class="card my-3">
+    <div class="card-header">
+      <span class="fw-bold">英語ラベルの日本語解説</span>
+    </div>
+    <div class="card-body">
+      <ul class="mb-0">
+        <li><span class="fw-semibold">Short USD P/L (Importer baseline)</span> … 現物USDショート（将来USD支払）の損益（本日時点比）。</li>
+        <li><span class="fw-semibold">Long Call K1 P/L</span> … 権利行使価格K1のコール買い損益（支払プレミアム込み）。</li>
+        <li><span class="fw-semibold">Short Call K2 P/L</span> … 権利行使価格K2のコール売り損益（受取プレミアム込み）。</li>
+        <li><span class="fw-semibold">Short Put K3 P/L</span> … 権利行使価格K3のプット売り損益（受取プレミアム込み）。</li>
+        <li><span class="fw-semibold">Combo (Short USD + Long Call@K1 − Short Call@K2 − Short Put@K3)</span> … 合成損益。</li>
+      </ul>
+    </div>
+  </div>
+  <!-- ▲▲ 挿入ここまで ▲▲ -->
+
+  <!-- 計算データ一覧 -->
+  <div class="card my-4">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <span class="fw-bold">計算データ一覧</span>
+      <!-- CSVダウンロード -->
+      <form method="post" action="{{ url_for('fx_download_csv_call_spread_collar') }}" class="mb-0">
+        <input type="hidden" name="S0" value="{{ S0 }}">
+        <input type="hidden" name="K1" value="{{ K1 }}">
+        <input type="hidden" name="K2" value="{{ K2 }}">
+        <input type="hidden" name="K3" value="{{ K3 }}">
+        <input type="hidden" name="prem_call1" value="{{ prem_call1 }}">
+        <input type="hidden" name="prem_call2" value="{{ prem_call2 }}">
+        <input type="hidden" name="prem_put3"  value="{{ prem_put3 }}">
+        <input type="hidden" name="qty" value="{{ qty }}">
+        <input type="hidden" name="smin" value="{{ smin }}">
+        <input type="hidden" name="smax" value="{{ smax }}">
+        <input type="hidden" name="points" value="{{ points }}">
+        <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+      </form>
+    </div>
+
+    <div class="card-body p-0">
+      <div class="table-responsive">
+        <table class="table table-sm table-striped mb-0">
+          <thead>
+            <tr>
+              <th>S_T (USD/JPY)</th>
+              <th class="text-end">Spot Short PnL (JPY)</th>
+              <th class="text-end">Long Call K1 PnL (JPY)</th>
+              <th class="text-end">Short Call K2 PnL (JPY)</th>
+              <th class="text-end">Short Put K3 PnL (JPY)</th>
+              <th class="text-end">Combo PnL (JPY)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in rows %}
+            <tr>
+              <td>{{ "%.3f"|format(r.st) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(r.spot_short) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(r.long_call) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(r.short_call) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(r.short_put) }}</td>
+              <td class="text-end">{{ "{:,.0f}".format(r.combo) }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 
-  <!-- CSV -->
-  <form method="post" action="{{ url_for('fx_download_csv_call_spread_collar') }}">
-    <input type="hidden" name="S0" value="{{ S0 }}">
-    <input type="hidden" name="K1" value="{{ K1 }}">
-    <input type="hidden" name="K2" value="{{ K2 }}">
-    <input type="hidden" name="K3" value="{{ K3 }}">
-    <input type="hidden" name="prem_call1" value="{{ prem_call1 }}">
-    <input type="hidden" name="prem_call2" value="{{ prem_call2 }}">
-    <input type="hidden" name="prem_put3"  value="{{ prem_put3 }}">
-    <input type="hidden" name="qty" value="{{ qty }}">
-    <input type="hidden" name="smin" value="{{ smin }}">
-    <input type="hidden" name="smax" value="{{ smax }}">
-    <input type="hidden" name="points" value="{{ points }}">
-    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
-  </form>
 </div>
 {% endblock %}

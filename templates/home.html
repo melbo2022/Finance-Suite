@@ -49,6 +49,299 @@
       </div>
     </div>
 
+    <!-- ヘッジ一覧（輸出/輸入） -->
+    <div class="col-md-12 mt-3">
+      <div class="card h-100 shadow-sm">
+        <div class="card-body">
+          <h5 class="card-title">ヘッジ（オプション）一覧</h5>
+          <p class="card-text small mb-3">
+            用途別（輸出／輸入）に代表的な戦略を整理しました。各項目の「説明を開く」で要点を確認し、「説明書」からPDFを表示できます。
+          </p>
+
+          <div class="row g-3">
+
+            <!-- 輸出向け -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-body">
+                  <h6 class="card-subtitle mb-2 text-muted">輸出向け（USD受取：USD/JPY下落が怖い）</h6>
+                  <ul class="list-group list-group-flush">
+
+                    <!-- プロテクティブ・プット -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>プロテクティブ・プット（現物ロング＋Put）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-pp-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_put') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_put') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-pp-desc" class="collapse mt-2 small">
+                        USD受取（ロングUSD）ポジションに対し、Putで下落の下限を設定。
+                      </div>
+                    </li>
+
+                    <!-- ゼロコスト（Put + Short Call） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>ゼロコスト（Put + Short Call）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-zc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_zero_cost') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_zero_cost') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-zc-desc" class="collapse mt-2 small">
+                        Put購入コストをShort Callのプレミアムで相殺。下落防御と上昇の上限設定。
+                      </div>
+                    </li>
+
+                    <!-- パーティシペーティング・コリドー（輸出向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>パーティシペーティング・コリドー（輸出向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-pc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_participating_collar') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_participating_collar') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-pc-desc" class="collapse mt-2 small">
+                        下落はPutで防御しつつ、上昇は一定比率で参加できる設計。
+                      </div>
+                    </li>
+
+                    <!-- シーガル（輸出向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>シーガル（輸出向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-sg-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_seagull') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_seagull') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-sg-desc" class="collapse mt-2 small">
+                        ゼロコストにOTMオプションを追加してプロファイルを微調整（例：Put Spread + Short Call）。
+                      </div>
+                    </li>
+
+                    <!-- ショート・リスクリバーサル（輸出向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>ショート・リスクリバーサル（輸出向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-rrs-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_risk_reversal_short') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_risk_reversal_short') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-rrs-desc" class="collapse mt-2 small">
+                        Putを買い、Callを売って下落ヘッジと上限設定を同時に達成。
+                      </div>
+                    </li>
+
+                    <!-- プット・スプレッド・コリドー（輸出向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>プット・スプレッド・コリドー（輸出向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#exp-psc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_put_spread_collar') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_put_spread_collar') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="exp-psc-desc" class="collapse mt-2 small">
+                        Putのスプレッド（ロングPut＋ショートOTMPut）にShort Callを組み合わせた派生形。
+                      </div>
+                    </li>
+
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <!-- 輸入向け -->
+            <div class="col-md-6">
+              <div class="card h-100">
+                <div class="card-body">
+                  <h6 class="card-subtitle mb-2 text-muted">輸入向け（USD支払：USD/JPY上昇が怖い）</h6>
+                  <ul class="list-group list-group-flush">
+
+                    <!-- プロテクティブ・コール -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>プロテクティブ・コール（現物ショート＋Call）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-pc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_call') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_call') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-pc-desc" class="collapse mt-2 small">
+                        USD支払（ショートUSD）ポジションに対し、Callで上昇リスクに上限を設定。
+                      </div>
+                    </li>
+
+                    <!-- ゼロコスト（Call + Short Put） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>ゼロコスト（Call + Short Put）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-zc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_zero_cost_long_call') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_zero_cost_long_call') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-zc-desc" class="collapse mt-2 small">
+                        Call購入をShort Putで相殺。上昇防御と下落時の一部制約を両立。
+                      </div>
+                    </li>
+
+                    <!-- パーティシペーティング・コリドー（輸入向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>パーティシペーティング・コリドー（輸入向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-pc2-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_pc_importer') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_pc_importer') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-pc2-desc" class="collapse mt-2 small">
+                        上昇はCallで防御、下落は一定比率で参加（Short Put比率で調整）。
+                      </div>
+                    </li>
+
+                    <!-- シーガル（輸入向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>シーガル（輸入向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-sg-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_seagull_importer') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_seagull_importer') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-sg-desc" class="collapse mt-2 small">
+                        ゼロコストにOTMオプションを追加し、グリップ感（上限/下限）を微調整。
+                      </div>
+                    </li>
+
+                    <!-- リスクリバーサル（輸入向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>リスクリバーサル（輸入向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-rr-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_risk_reversal') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_risk_reversal') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-rr-desc" class="collapse mt-2 small">
+                        Callを買い、Putを売ることで上昇の上限を設定しつつ、下落時は一定のキャップを受け入れる。
+                      </div>
+                    </li>
+
+                    <!-- コール・スプレッド・コリドー（輸入向け） -->
+                    <li class="list-group-item">
+                      <div class="d-flex align-items-center justify-content-between">
+                        <span>コール・スプレッド・コリドー（輸入向け）</span>
+                        <div class="d-flex align-items-center">
+                          <button class="btn btn-sm btn-outline-secondary me-2"
+                                  data-bs-toggle="collapse" data-bs-target="#imp-csc-desc"
+                                  aria-expanded="false">説明を開く</button>
+                          {% set pdf = doc_url('fx_call_spread_collar') %}
+                          <a href="{{ pdf or '#' }}"
+                             class="badge rounded-pill text-decoration-none me-2
+                                    {% if pdf %}bg-info{% else %}bg-secondary disabled opacity-50{% endif %}"
+                             target="_blank" rel="noopener">説明書</a>
+                          <a href="{{ url_for('fx_call_spread_collar') }}" class="btn btn-sm btn-outline-primary">開く</a>
+                        </div>
+                      </div>
+                      <div id="imp-csc-desc" class="collapse mt-2 small">
+                        Callのスプレッド（ロングCall＋ショートOTMCall）にShort Putを組み合わせた派生形。
+                      </div>
+                    </li>
+
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+          </div><!-- /.row -->
+
+        </div>
+      </div>
+    </div>
+
     {% if show_fin_tools %}
     <!-- 金融電卓（表示フラグが True のときだけ出す） -->
     <div class="col-md-6 mt-3">

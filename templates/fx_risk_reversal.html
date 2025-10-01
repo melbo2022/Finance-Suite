@@ -22,9 +22,18 @@
 
   <!-- サマリー -->
   <div class="card my-4">
-    <div class="card-header fw-bold">サマリー</div>
-    <div class="card-body">
-      <div class="row g-3 text-center">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">サマリー</span>
+    <a
+      class="btn btn-sm btn-outline-primary"
+      href="{{ url_for('static', filename='reports/risk_reversal_importer_report.pdf') }}"
+      target="_blank" rel="noopener"
+    >デフォルト報告書</a>
+  </div>
+  <div class="card-body">
+    <div class="row g-3 text-center">
+
+
         <!-- ネット・プレミアム -->
         <div class="col-md-4">
           <div class="border rounded p-3 h-100">
@@ -100,41 +109,48 @@
     </div>
   </div>
 
-  <!-- テーブル -->
-  <div class="table-responsive">
-    <table class="table table-sm table-striped">
-      <thead>
-        <tr>
-          <th>S_T (USD/JPY)</th>
-          <th>LongCall_PnL (JPY)</th>
-          <th>ShortPut_PnL (JPY)</th>
-          <th>Combo_PnL (JPY)</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for r in rows %}
-        <tr>
-          <td>{{ "%.3f"|format(r.st) }}</td>
-          <td>{{ "{:,.0f}".format(r.long_call) }}</td>
-          <td>{{ "{:,.0f}".format(r.short_put) }}</td>
-          <td>{{ "{:,.0f}".format(r.combo) }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+  <!-- 計算データ一覧 -->
+<div class="card my-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span class="fw-bold">計算データ一覧</span>
+    <!-- CSVダウンロード -->
+    <form method="post" action="{{ url_for('fx_download_csv_risk_reversal') }}" class="mb-0">
+      <input type="hidden" name="Kc" value="{{ Kc }}">
+      <input type="hidden" name="Kp" value="{{ Kp }}">
+      <input type="hidden" name="prem_call" value="{{ prem_call }}">
+      <input type="hidden" name="prem_put" value="{{ prem_put }}">
+      <input type="hidden" name="qty" value="{{ qty }}">
+      <input type="hidden" name="smin" value="{{ smin }}">
+      <input type="hidden" name="smax" value="{{ smax }}">
+      <input type="hidden" name="points" value="{{ points }}">
+      <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
+    </form>
   </div>
 
-  <!-- CSVダウンロード -->
-  <form method="post" action="{{ url_for('fx_download_csv_risk_reversal') }}">
-    <input type="hidden" name="Kc" value="{{ Kc }}">
-    <input type="hidden" name="Kp" value="{{ Kp }}">
-    <input type="hidden" name="prem_call" value="{{ prem_call }}">
-    <input type="hidden" name="prem_put" value="{{ prem_put }}">
-    <input type="hidden" name="qty" value="{{ qty }}">
-    <input type="hidden" name="smin" value="{{ smin }}">
-    <input type="hidden" name="smax" value="{{ smax }}">
-    <input type="hidden" name="points" value="{{ points }}">
-    <button class="btn btn-outline-secondary btn-sm">CSVダウンロード</button>
-  </form>
+  <div class="card-body p-0">
+    <div class="table-responsive">
+      <table class="table table-sm table-striped mb-0">
+        <thead>
+          <tr>
+            <th>S_T (USD/JPY)</th>
+            <th class="text-end">Long Call PnL (JPY)</th>
+            <th class="text-end">Short Put PnL (JPY)</th>
+            <th class="text-end">Combo PnL (JPY)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in rows %}
+          <tr>
+            <td>{{ "%.3f"|format(r.st) }}</td>
+            <td class="text-end">{{ "{:,.0f}".format(r.long_call) }}</td>
+            <td class="text-end">{{ "{:,.0f}".format(r.short_put) }}</td>
+            <td class="text-end">{{ "{:,.0f}".format(r.combo) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 </div>
+
 {% endblock %}
